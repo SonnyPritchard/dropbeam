@@ -2,7 +2,7 @@
   "name": "dropbeam",
   "version": "1.0.0",
   "description": "AirDrop-style P2P file transfer over LAN",
-  "main": "src/main.js",
+  "main": "server.js",
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win",
