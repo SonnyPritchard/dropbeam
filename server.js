@@ -139,14 +139,8 @@ httpServer.listen(process.env.HTTP_PORT || HTTP_PORT, '0.0.0.0', () => {
 //   Server→Browser: { type:'signal', from, type, data, ... }
 //   Peer→Server (direct): { from, type, data, ... }  → forwarded to browsers
 
-const signalingServer = http.createServer((req, res) => {
-  if (req.url === '/info' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ id: deviceId, name: deviceName, port: SIGNAL_PORT }));
-  } else { res.writeHead(404); res.end(); }
-});
-
-const wss = new WebSocketServer({ server: signalingServer });
+// WS server shares the same HTTP server (single port for cloud deployment)
+const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws, req) => {
   const remoteIp = (req.socket.remoteAddress || '').replace('::ffff:', '');
@@ -178,9 +172,7 @@ wss.on('connection', (ws, req) => {
   ws.on('error', () => connectedBrowsers.delete(ws));
 });
 
-signalingServer.listen(SIGNAL_PORT, '0.0.0.0', () => {
-  console.log(`[signal] WS server on port ${SIGNAL_PORT}`);
-});
+// WS now attached to httpServer — no separate listen needed
 
 function forwardSignalToDevice(host, port, payload) {
   let ws2;
