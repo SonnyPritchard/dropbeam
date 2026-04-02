@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DropBeam</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f13;
+      --surface: #1a1a24;
+      --surface2: #22222f;
+      --border: #2e2e40;
+      --accent: #6366f1;
+      --accent-glow: rgba(99,102,241,0.3);
+      --accent2: #22d3ee;
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Title bar */
+    .titlebar {
+      height: 40px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+    .titlebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: -0.3px;
+    }
+    .titlebar-logo svg { color: var(--accent); }
+    .titlebar-device {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .titlebar-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--success);
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 5px;
+      box-shadow: 0 0 6px var(--success);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity:1; } 50% { opacity:.5; }
+    }
+
+    /* Layout */
+    .app-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sidebar-header {
+      padding: 16px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .refresh-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      transition: color .2s;
+    }
+    .refresh-btn:hover { color: var(--accent); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinning { animation: spin 1s linear infinite; }
+
+    .device-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .device-list::-webkit-scrollbar { width: 4px; }
+    .device-list::-webkit-scrollbar-track { background: transparent; }
+    .device-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .device-card {
+      padding: 12px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all .2s;
+      margin-bottom: 4px;
+      border: 1.5px solid transparent;
+      position: relative;
+    }
+    .device-card:hover {
+      background: var(--surface2);
+      border-color: var(--border);
+    }
+    .device-card.drag-over {
+      background: rgba(99,102,241,0.12);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    .device-card.sending {
+      border-color: var(--accent2);
+      background: rgba(34,211,238,0.06);
+    }
+    .device-name {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+    .device-ip {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .device-status {
+      font-size: 11px;
+      margin-top: 4px;
+    }
+    .device-status.idle { color: var(--text-muted); }
+    .device-status.sending { color: var(--accent2); }
+    .device-status.done { color: var(--success); }
+
+    /* Progress bar inside device card */
+    .device-progress {
+      margin-top: 8px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      display: none;
+    }
+    .device-progress.active { display: block; }
+    .device-progress-fill {
+      height: 100%;
+      background: var(--accent2);
+      border-radius: 2px;
+      transition: width .3s;
+    }
+
+    .no-devices {
+      text-align: center;
+      padding: 40px 16px;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .no-devices svg { margin-bottom: 12px; opacity: .4; }
+
+    /* Main area */
+    .main-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .drop-zone {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      position: relative;
+      overflow: hidden;
+    }
+    .drop-zone::before {
+      content: '';
+      position: absolute;
+      inset: 20px;
+      border: 2px dashed var(--border);
+      border-radius: 20px;
+      pointer-events: none;
+      transition: all .3s;
+    }
+    .drop-zone.drag-active::before {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 40px var(--accent-glow);
+    }
+    .drop-zone-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      opacity: .25;
+      transition: opacity .3s;
+    }
+    .drop-zone.drag-active .drop-zone-icon { opacity: .6; }
+    .drop-zone-text {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-muted);
+      transition: color .3s;
+    }
+    .drop-zone.drag-active .drop-zone-text { color: var(--accent); }
+    .drop-zone-sub {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      opacity: .7;
+    }
+
+    /* Activity log */
+    .activity-panel {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      max-height: 180px;
+      display: flex;
+      flex-direction: column;
+    }
+    .activity-header {
+      padding: 8px 16px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .clear-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color .2s;
+    }
+    .clear-btn:hover { color: var(--text); }
+    .activity-log {
+      overflow-y: auto;
+      flex: 1;
+      padding: 6px 16px;
+      display: flex;
+      flex-direction: column-reverse;
+    }
+    .activity-log::-webkit-scrollbar { width: 4px; }
+    .activity-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .log-entry {
+      font-size: 12px;
+      padding: 3px 0;
+      color: var(--text-muted);
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .log-entry .log-time { color: var(--text-muted); opacity: .5; flex-shrink: 0; }
+    .log-entry.success .log-msg { color: var(--success); }
+    .log-entry.error .log-msg { color: var(--danger); }
+    .log-entry.info .log-msg { color: var(--text); }
+    .log-entry.warn .log-msg { color: var(--warning); }
+
+    /* Toast notification */
+    #toast-container {
+      position: fixed;
+      top: 50px;
+      right: 16px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-width: 240px;
+      max-width: 340px;
+      font-size: 13px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      animation: slideIn .25s ease;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(120%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .toast.success { border-color: var(--success); }
+    .toast.error { border-color: var(--danger); }
+    .toast-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+    .toast-body .toast-title { font-weight: 600; margin-bottom: 2px; }
+    .toast-body .toast-desc { color: var(--text-muted); font-size: 12px; }
+
+    /* Incoming transfer modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      backdrop-filter: blur(4px);
+      display: none;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 32px;
+      min-width: 340px;
+      max-width: 420px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+      animation: modalIn .2s ease;
+    }
+    @keyframes modalIn {
+      from { transform: scale(.95); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+    .modal-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px; }
+    .modal-file-info {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 20px;
+      font-size: 13px;
+    }
+    .modal-file-name { font-weight: 600; margin-bottom: 2px; }
+    .modal-file-size { font-size: 11px; color: var(--text-muted); }
+    .modal-actions { display: flex; gap: 10px; }
+    .btn {
+      flex: 1;
+      padding: 9px 0;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-accept { background: var(--accent); color: white; }
+    .btn-accept:hover { background: #5254cc; }
+    .btn-decline { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+    .btn-decline:hover { color: var(--danger); border-color: var(--danger); }
+  </style>
+</head>
+<body>
+
+<!-- Title bar -->
+<div class="titlebar">
+  <div class="titlebar-logo">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+    </svg>
+    DropBeam
+  </div>
+  <div class="titlebar-device">
+    <span class="titlebar-dot"></span>
+    <span id="self-name">Loading…</span>
+  </div>
+</div>
+
+<div class="app-body">
+  <!-- Sidebar: device list -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Nearby Devices</span>
+      <button class="refresh-btn" id="refresh-btn" title="Refresh">
+        <svg id="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+          <path d="M21 3v5h-5"/>
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+          <path d="M8 16H3v5"/>
+        </svg>
+      </button>
+    </div>
+    <div class="device-list" id="device-list">
+      <div class="no-devices">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <path d="M8 21h8M12 17v4"/>
+        </svg>
+        <div>Scanning for devices…<br/>Make sure others are on the same network</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main area -->
+  <div class="main-area">
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-zone-icon">⚡</div>
+      <div class="drop-zone-text">Drop files here or drag onto a device</div>
+      <div class="drop-zone-sub">Files transfer directly — no servers, no cloud</div>
+    </div>
+
+    <!-- Activity log -->
+    <div class="activity-panel">
+      <div class="activity-header">
+        Activity
+        <button class="clear-btn" id="clear-log">Clear</button>
+      </div>
+      <div class="activity-log" id="activity-log"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Incoming transfer modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <div class="modal-title">📥 Incoming Transfer</div>
+    <div class="modal-desc" id="modal-desc">Someone wants to send you a file.</div>
+    <div class="modal-file-info">
+      <div class="modal-file-name" id="modal-file-name">file.zip</div>
+      <div class="modal-file-size" id="modal-file-size">0 KB</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-accept" id="modal-accept">Accept</button>
+      <button class="btn btn-decline" id="modal-decline">Decline</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
