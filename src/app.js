@@ -99,19 +99,11 @@ function createWebAdapter() {
       return true; // always accept — modal is shown inline
     },
 
-    saveFile: async ({ fileName, chunks }) => {
-      // Browser: reconstruct and trigger download
-      const buffers = chunks.map(c => {
-        const bin = atob(c);
-        const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        return arr;
-      });
-      const blob = new Blob(buffers);
+    saveFile: async ({ fileName, blob }) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = fileName; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
       return { filePath: fileName };
     },
 
@@ -302,25 +294,21 @@ async function sendOneFile(file, device) {
   setDeviceProgress(device.id, 0);
 
   try {
-    // Read file
-    const fileData = await readFileAsBase64(file);
-
     // Get or create WebRTC connection to device
     const { pc, dc } = await getOrCreateConnection(device, transferId);
 
     // Wait for data channel to open
     await waitForOpen(dc);
 
-    // Send metadata first
-    const meta = JSON.stringify({
+    // Send metadata first (JSON string)
+    dc.send(JSON.stringify({
       type: 'meta',
       transferId,
       fromName: selfInfo.name,
       fileName: file.name,
       fileSize: file.size,
       mimeType: file.type
-    });
-    dc.send(meta);
+    }));
 
     // Wait for accept/decline
     const accepted = await waitForAcceptance(transferId);
@@ -332,30 +320,35 @@ async function sendOneFile(file, device) {
       return;
     }
 
-    // Send file in chunks
-    const CHUNK_SIZE = 64 * 1024; // 64KB chunks
-    const raw = base64ToUint8(fileData);
-    const total = raw.length;
+    // Send file as binary chunks with backpressure
+    const CHUNK_SIZE = 64 * 1024; // 64KB
+    const BUFFER_THRESHOLD = 1024 * 1024; // 1MB — pause if buffer exceeds this
+    const total = file.size;
     let offset = 0;
     let chunkIndex = 0;
 
     while (offset < total) {
-      const chunk = raw.slice(offset, offset + CHUNK_SIZE);
-      const msg = JSON.stringify({
-        type: 'chunk',
+      // Backpressure: wait if buffer is full
+      while (dc.bufferedAmount > BUFFER_THRESHOLD) {
+        await sleep(50);
+      }
+
+      const slice = file.slice(offset, offset + CHUNK_SIZE);
+      const arrayBuffer = await slice.arrayBuffer();
+
+      // Send header frame (JSON) then binary frame
+      dc.send(JSON.stringify({
+        type: 'chunk-header',
         transferId,
         index: chunkIndex,
-        data: uint8ToBase64(chunk),
-        final: offset + chunk.length >= total
-      });
-      dc.send(msg);
-      offset += chunk.length;
-      chunkIndex++;
-      const pct = Math.round((offset / total) * 100);
-      setDeviceProgress(device.id, pct);
+        size: arrayBuffer.byteLength,
+        final: offset + arrayBuffer.byteLength >= total
+      }));
+      dc.send(arrayBuffer);
 
-      // Throttle slightly to avoid flooding the data channel
-      if (chunkIndex % 16 === 0) await sleep(1);
+      offset += arrayBuffer.byteLength;
+      chunkIndex++;
+      setDeviceProgress(device.id, Math.round((offset / total) * 100));
     }
 
     setDeviceStatus(device.id, `✓ Sent ${file.name}`, 'done');
@@ -475,23 +468,50 @@ async function handleOffer(fromId, { sdp, transferId }) {
 }
 
 function setupReceiverChannel(channel, fromId, transferId) {
-  let transferState = null;
+  let pendingHeader = null; // last chunk-header waiting for its binary frame
 
   channel.onmessage = async ({ data }) => {
+    // Binary frame — the actual chunk data
+    if (data instanceof ArrayBuffer) {
+      if (!pendingHeader) return;
+      const { tId, index, final } = pendingHeader;
+      pendingHeader = null;
+
+      const state = incomingTransfers.get(tId);
+      if (!state) return;
+
+      state.chunks.push(data);
+      state.received += data.byteLength;
+      const pct = Math.min(100, Math.round((state.received / state.fileSize) * 100));
+      log('info', `Receiving… ${pct}%`);
+
+      if (final) {
+        try {
+          const blob = new Blob(state.chunks);
+          const { filePath } = await db.saveFile({ fileName: state.fileName, blob });
+          log('success', `Received "${state.fileName}" from ${state.fromName} → ${filePath}`);
+          showToast('File received!', `"${state.fileName}" saved`, 'success');
+          incomingTransfers.delete(tId);
+        } catch (err) {
+          log('error', `Failed to save "${state.fileName}": ${err.message}`);
+        }
+      }
+      return;
+    }
+
+    // JSON control frame
     let msg;
     try { msg = JSON.parse(data); } catch { return; }
 
     if (msg.type === 'meta') {
-      // Show accept/decline dialog
-      transferState = {
+      incomingTransfers.set(msg.transferId, {
         transferId: msg.transferId,
         fileName: msg.fileName,
         fileSize: msg.fileSize,
         fromName: msg.fromName,
         chunks: [],
         received: 0
-      };
-      incomingTransfers.set(msg.transferId, transferState);
+      });
 
       const accepted = await showIncomingModal(msg.fromName, msg.fileName, msg.fileSize);
       log(accepted ? 'info' : 'warn', accepted
@@ -504,32 +524,10 @@ function setupReceiverChannel(channel, fromId, transferId) {
         data: { transferId: msg.transferId }
       });
 
-      if (!accepted) {
-        incomingTransfers.delete(msg.transferId);
-      }
+      if (!accepted) incomingTransfers.delete(msg.transferId);
 
-    } else if (msg.type === 'chunk') {
-      const state = incomingTransfers.get(msg.transferId);
-      if (!state) return;
-
-      state.chunks[msg.index] = msg.data;
-      state.received++;
-      const pct = Math.round((state.received * 64 * 1024 / state.fileSize) * 100);
-
-      if (msg.final) {
-        // Save file
-        try {
-          const { filePath } = await db.saveFile({
-            fileName: state.fileName,
-            chunks: state.chunks
-          });
-          log('success', `Received "${state.fileName}" from ${state.fromName} → ${filePath}`);
-          showToast('File received!', `"${state.fileName}" saved to Downloads`, 'success');
-          incomingTransfers.delete(msg.transferId);
-        } catch (err) {
-          log('error', `Failed to save "${state.fileName}": ${err.message}`);
-        }
-      }
+    } else if (msg.type === 'chunk-header') {
+      pendingHeader = { tId: msg.transferId, index: msg.index, final: msg.final };
     }
   };
 }
