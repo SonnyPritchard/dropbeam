@@ -19,8 +19,8 @@ const { WebSocketServer, WebSocket } = require('ws');
 const multicastDns = require('multicast-dns');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const HTTP_PORT = parseInt(process.env.HTTP_PORT || 3000);
-const SIGNAL_PORT = 47821;
+const HTTP_PORT = parseInt(process.env.HTTP_PORT || process.env.PORT || 3000);
+const SIGNAL_PORT = parseInt(process.env.SIGNAL_PORT || process.env.PORT || 47821);
 const SERVICE_TYPE = '_dropbeam._tcp.local';
 
 const deviceName = os.hostname() + ' (web)';

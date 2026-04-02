@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: dropbeam-signal
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: HTTP_PORT
+        value: 10000
+      - key: SIGNAL_PORT
+        value: 10000
+    healthCheckPath: /info
