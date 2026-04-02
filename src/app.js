@@ -27,7 +27,9 @@ function createWebAdapter() {
 
     ws.onopen = () => {
       wsReady = true;
-      ws.send(JSON.stringify({ action: 'register' }));
+      const localId = localStorage.getItem('dropbeam-id') || `peer-${Math.random().toString(36).slice(2,9)}`;
+      localStorage.setItem('dropbeam-id', localId);
+      ws.send(JSON.stringify({ action: 'register', id: localId, name: navigator.platform || 'Browser' }));
       pendingMessages.forEach(m => ws.send(m));
       pendingMessages.length = 0;
     };
@@ -84,16 +86,9 @@ function createWebAdapter() {
     },
 
     sendSignal: async ({ targetId, type, data, transferMeta }) => {
-      // We need the target's host+port; fetch from /devices
-      const res = await fetch(`http://${wsHost}:3000/devices`).catch(() => null);
-      const devices = res && res.ok ? await res.json() : [];
-      const target = devices.find(d => d.id === targetId);
-      if (!target) throw new Error(`Device ${targetId} not found`);
-
       wsSend({
         action: 'forward',
-        targetHost: target.host,
-        targetPort: target.port,
+        targetId,
         payload: { from: selfInfo?.id || 'browser', fromName: selfInfo?.name || 'Browser', type, data, transferMeta }
       });
       return { ok: true };

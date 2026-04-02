@@ -28,7 +28,7 @@ const deviceId = `${os.hostname()}-web-${Math.random().toString(36).slice(2, 7)}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 const discoveredDevices = new Map(); // id -> { id, name, host, port, lastSeen }
-const connectedBrowsers = new Set(); // Set of WebSocket connections (browser clients)
+const connectedBrowsers = new Map(); // peerId -> WebSocket
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getLocalIps() {
@@ -45,10 +45,10 @@ function getLocalIps() {
 function getLocalIp() { return getLocalIps()[0]; }
 function getDeviceList() { return Array.from(discoveredDevices.values()); }
 
-function broadcastToBrowsers(msg) {
+function broadcastToBrowsers(msg, excludeId = null) {
   const str = typeof msg === 'string' ? msg : JSON.stringify(msg);
-  for (const ws of connectedBrowsers) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(str);
+  for (const [id, ws] of connectedBrowsers) {
+    if (id !== excludeId && ws.readyState === WebSocket.OPEN) ws.send(str);
   }
 }
 
@@ -144,32 +144,58 @@ const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws, req) => {
   const remoteIp = (req.socket.remoteAddress || '').replace('::ffff:', '');
-  let isBrowser = false;
+  let peerId = null;
 
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.action === 'register') {
-      isBrowser = true;
-      connectedBrowsers.add(ws);
-      ws.send(JSON.stringify({ type: 'self-info', id: deviceId, name: deviceName, ip: getLocalIp(), port: SIGNAL_PORT }));
-      ws.send(JSON.stringify({ type: 'devices-updated', devices: getDeviceList() }));
-      console.log(`[ws] Browser client connected from ${remoteIp}`);
+      // Client sends { action:'register', id, name }
+      peerId = msg.id || `peer-${Math.random().toString(36).slice(2, 7)}`;
+      const peerName = msg.name || remoteIp;
+      connectedBrowsers.set(peerId, ws);
+
+      // Add to device list so others can see this peer
+      addDevice({ id: peerId, name: peerName, host: 'signal', port: HTTP_PORT, relay: true });
+
+      // Tell this client who they are + current device list
+      ws.send(JSON.stringify({ type: 'self-info', id: peerId, name: peerName, ip: remoteIp, port: HTTP_PORT }));
+      ws.send(JSON.stringify({ type: 'devices-updated', devices: getDeviceList().filter(d => d.id !== peerId) }));
+
+      // Tell everyone else about the new peer
+      broadcastToBrowsers({ type: 'devices-updated', devices: getDeviceList() }, peerId);
+      console.log(`[ws] ${peerName} (${peerId}) connected from ${remoteIp}`);
       return;
     }
 
     if (msg.action === 'forward') {
-      forwardSignalToDevice(msg.targetHost, msg.targetPort, msg.payload);
+      // Forward signal to a specific peer by id (relay mode for internet peers)
+      const targetWs = connectedBrowsers.get(msg.targetId);
+      if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+        targetWs.send(JSON.stringify({ type: 'signal', from: peerId, ...msg.payload }));
+      } else {
+        // Fall back to direct device forwarding (LAN)
+        forwardSignalToDevice(msg.targetHost, msg.targetPort, msg.payload);
+      }
       return;
     }
 
     // Inbound signal from another peer → forward to browser clients
-    broadcastToBrowsers({ type: 'signal', ...msg });
+    broadcastToBrowsers({ type: 'signal', from: peerId, ...msg });
   });
 
-  ws.on('close', () => connectedBrowsers.delete(ws));
-  ws.on('error', () => connectedBrowsers.delete(ws));
+  ws.on('close', () => {
+    if (peerId) {
+      connectedBrowsers.delete(peerId);
+      discoveredDevices.delete(peerId);
+      broadcastToBrowsers({ type: 'devices-updated', devices: getDeviceList() });
+      console.log(`[ws] ${peerId} disconnected`);
+    }
+  });
+  ws.on('error', () => {
+    if (peerId) connectedBrowsers.delete(peerId);
+  });
 });
 
 // WS now attached to httpServer — no separate listen needed
