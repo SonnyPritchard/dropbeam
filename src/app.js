@@ -47,8 +47,7 @@ function createWebAdapter() {
         return;
       }
       if (msg.type === 'signal') {
-        const { type: ignored, ...signal } = msg; // unwrap outer 'signal' type
-        if (signalCallback) signalCallback(signal);
+        if (signalCallback) signalCallback({ ...msg.payload, from: msg.from });
         return;
       }
     };

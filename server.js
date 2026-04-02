@@ -173,7 +173,7 @@ wss.on('connection', (ws, req) => {
       // Forward signal to a specific peer by id (relay mode for internet peers)
       const targetWs = connectedBrowsers.get(msg.targetId);
       if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-        targetWs.send(JSON.stringify({ type: 'signal', from: peerId, ...msg.payload }));
+        targetWs.send(JSON.stringify({ type: 'signal', from: peerId, payload: msg.payload }));
       } else {
         // Fall back to direct device forwarding (LAN)
         forwardSignalToDevice(msg.targetHost, msg.targetPort, msg.payload);
