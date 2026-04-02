@@ -9,10 +9,10 @@ const db = window.dropbeam || createWebAdapter();
  * Used when running in a browser without the Electron preload.
  */
 function createWebAdapter() {
-  const SIGNAL_PORT = 47821;
-  // Connect to the signaling WS on the same host that served this page
-  const wsHost = location.hostname;
-  const wsUrl = `ws://${wsHost}:${SIGNAL_PORT}`;
+  // Connect to signaling server — use public Render deployment or same host if local
+  const PUBLIC_SIGNAL = 'wss://dropbeam.onrender.com';
+  const isLocal = location.hostname === 'localhost' || location.hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./);
+  const wsUrl = isLocal ? `ws://${location.hostname}:${location.port || 47821}` : PUBLIC_SIGNAL;
 
   let ws = null;
   let selfInfo = null;
