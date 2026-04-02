@@ -3,7 +3,7 @@ services:
     name: dropbeam-signal
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install --omit=dev
     startCommand: node server.js
     envVars:
       - key: HTTP_PORT
