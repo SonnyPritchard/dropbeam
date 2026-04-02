@@ -1,72 +1,79 @@
-# DropBeam ⚡
+# DropBeam 🚀
 
-**AirDrop-style P2P file transfer for your local network.**  
-Devices auto-discover each other via mDNS. Drag files → pick a device → files transfer directly via WebRTC. No internet, no servers, no codes.
+AirDrop-style P2P file transfer over LAN. Works between any combination of Electron app and web browser — no internet required.
 
----
+## Features
+- 🖥️ **Electron desktop app** (Windows, macOS, Linux)
+- 🌐 **Web browser mode** — share a URL, anyone on the LAN can use it
+- 🔍 **Auto-discovery** via mDNS (primary) + subnet scan (fallback, for Windows firewall)
+- ⚡ **WebRTC data channels** — direct P2P transfer, no server relay
+- 🔀 **Cross-compatible** — Electron↔Electron, Electron↔Browser, Browser↔Browser
 
-## Run (development)
+## Usage
 
+### Electron App
 ```bash
-cd dropbeam
 npm install
 npm start
 ```
 
-## Build
-
+### Web Server Mode
 ```bash
-# Windows (.exe installer via NSIS)
-npm run build:win
-
-# macOS (.dmg)
-npm run build:mac
-
-# Both
-npm run build:all
+npm install
+npm run web
+# or: node server.js
 ```
 
-Outputs go to `dist/`.
+The server prints your local URLs on startup:
+```
+🚀 DropBeam Web Server started
+────────────────────────────────────────
+   http://192.168.1.10:3000
+   (also http://localhost:3000)
+────────────────────────────────────────
+📡 Signaling WS on port 47821
+🔍 Discovering peers via mDNS + subnet scan
+```
 
----
+Share the URL (e.g. `http://192.168.1.10:3000`) with anyone on your LAN. They open it in a browser and can immediately send/receive files.
 
-## How it works
-
-| Layer | Tech |
-|-------|------|
-| App shell | Electron 29 |
-| LAN discovery | `multicast-dns` (mDNS/Bonjour) |
-| P2P transfer | Browser-native WebRTC (RTCDataChannel) |
-| Signaling | In-app HTTP server (Express) on each instance — no external relay |
-| STUN | Google's free STUN servers |
-
-### Flow
-1. Each instance starts a local HTTP signaling server (port 47821+)
-2. mDNS announces the device and its signaling port to the LAN
-3. Sender drags file onto a device card → WebRTC offer/answer exchanged via HTTP
-4. ICE negotiation completes (STUN-assisted) → direct P2P data channel opens
-5. File chunks stream over the data channel → saved to receiver's Downloads folder
-
----
+### Cross-Compatibility
+All modes discover each other automatically:
+- Electron apps + web server instances announce on mDNS and respond to subnet scans
+- Signaling uses WebSocket on port **47821** — same protocol everywhere
+- WebRTC negotiation is identical regardless of client type
 
 ## Architecture
 
 ```
-src/
-  main.js      — Electron main process: mDNS, signaling server, file I/O
-  preload.js   — Context bridge (secure IPC between main ↔ renderer)
-  index.html   — UI shell
-  app.js       — Renderer: WebRTC logic, UI interactions
-assets/
-  icon.*       — App icons (replace with proper ones for release)
+┌─────────────────────────────────────────────────────────────┐
+│  Discovery: mDNS (primary) + subnet HTTP scan (fallback)    │
+│                                                             │
+│  Signaling: WebSocket on port 47821                         │
+│  - Electron: WS server in main.js                           │
+│  - Web: WS server in server.js (also proxies for browsers)  │
+│                                                             │
+│  Transfer: WebRTC DataChannel (direct P2P)                  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
----
+### Web Server Signaling Flow
+```
+Browser ──(WS register)──► server.js:47821
+Browser ──(forward msg)──► server.js ──(WS)──► target:47821
+target  ──(WS msg)───────► server.js ──(WS)──► Browser
+```
 
-## Notes
+## Building
 
-- **WSL/Linux**: mDNS multicast may need a firewall rule: `sudo ufw allow 5353/udp`
-- **Windows**: Windows Firewall will prompt on first run to allow the signaling port
-- **Native rebuild**: No native modules used — fully cross-platform JS
-- **Large files**: Currently loads file into memory before transfer. For files >500MB, a streaming approach is recommended.
+```bash
+npm run build:win    # Windows installer
+npm run build:mac    # macOS DMG
+npm run build:all    # Both
+```
 
+## Ports Used
+| Port  | Purpose                        |
+|-------|--------------------------------|
+| 3000  | HTTP (web server mode only)    |
+| 47821 | WebSocket signaling (all modes)|

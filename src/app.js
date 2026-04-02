@@ -1,7 +1,134 @@
 // ─── DropBeam Renderer (app.js) ───────────────────────────────────────────────
-// Uses browser-native WebRTC + window.dropbeam IPC bridge
+// Works in both Electron (via window.dropbeam preload IPC) and plain browser
+// (via WebSocket + fetch to the local DropBeam web server)
 
-const db = window.dropbeam;
+const db = window.dropbeam || createWebAdapter();
+
+/**
+ * Web adapter — mirrors the window.dropbeam API using WebSocket + fetch.
+ * Used when running in a browser without the Electron preload.
+ */
+function createWebAdapter() {
+  const SIGNAL_PORT = 47821;
+  // Connect to the signaling WS on the same host that served this page
+  const wsHost = location.hostname;
+  const wsUrl = `ws://${wsHost}:${SIGNAL_PORT}`;
+
+  let ws = null;
+  let selfInfo = null;
+  let devicesCallback = null;
+  let signalCallback = null;
+  let reconnectTimer = null;
+  let wsReady = false;
+  const pendingMessages = []; // queued while connecting
+
+  function connect() {
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      wsReady = true;
+      ws.send(JSON.stringify({ action: 'register' }));
+      pendingMessages.forEach(m => ws.send(m));
+      pendingMessages.length = 0;
+    };
+
+    ws.onmessage = ({ data }) => {
+      let msg;
+      try { msg = JSON.parse(data); } catch { return; }
+
+      if (msg.type === 'self-info') {
+        selfInfo = { id: msg.id, name: msg.name, ip: msg.ip, port: msg.port };
+        return;
+      }
+      if (msg.type === 'devices-updated') {
+        if (devicesCallback) devicesCallback(msg.devices || []);
+        return;
+      }
+      if (msg.type === 'signal') {
+        const { type: ignored, ...signal } = msg; // unwrap outer 'signal' type
+        if (signalCallback) signalCallback(signal);
+        return;
+      }
+    };
+
+    ws.onclose = () => {
+      wsReady = false;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connect, 3000);
+    };
+
+    ws.onerror = () => { ws.close(); };
+  }
+
+  connect();
+
+  function wsSend(msg) {
+    const str = JSON.stringify(msg);
+    if (wsReady && ws.readyState === WebSocket.OPEN) ws.send(str);
+    else pendingMessages.push(str);
+  }
+
+  return {
+    getSelfInfo: async () => {
+      // Poll until we get self-info from the WS register response
+      for (let i = 0; i < 30 && !selfInfo; i++) {
+        await new Promise(r => setTimeout(r, 200));
+      }
+      return selfInfo || { id: 'unknown', name: location.hostname, ip: location.hostname, port: SIGNAL_PORT };
+    },
+
+    getDevices: async () => {
+      const res = await fetch(`http://${wsHost}:3000/devices`).catch(() => null);
+      if (res && res.ok) return res.json();
+      return [];
+    },
+
+    sendSignal: async ({ targetId, type, data, transferMeta }) => {
+      // We need the target's host+port; fetch from /devices
+      const res = await fetch(`http://${wsHost}:3000/devices`).catch(() => null);
+      const devices = res && res.ok ? await res.json() : [];
+      const target = devices.find(d => d.id === targetId);
+      if (!target) throw new Error(`Device ${targetId} not found`);
+
+      wsSend({
+        action: 'forward',
+        targetHost: target.host,
+        targetPort: target.port,
+        payload: { from: selfInfo?.id || 'browser', fromName: selfInfo?.name || 'Browser', type, data, transferMeta }
+      });
+      return { ok: true };
+    },
+
+    showTransferDialog: async ({ fromName, fileName, fileSize }) => {
+      // In browser, we show the built-in modal (handled in setupReceiverChannel)
+      return true; // always accept — modal is shown inline
+    },
+
+    saveFile: async ({ fileName, chunks }) => {
+      // Browser: reconstruct and trigger download
+      const buffers = chunks.map(c => {
+        const bin = atob(c);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return arr;
+      });
+      const blob = new Blob(buffers);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return { filePath: fileName };
+    },
+
+    readFile: async ({ filePath }) => {
+      throw new Error('readFile not available in browser — use drag & drop');
+    },
+
+    onDevicesUpdated: (cb) => { devicesCallback = cb; },
+    onSignalReceived: (cb) => { signalCallback = cb; },
+    removeAllListeners: () => {}
+  };
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let selfInfo = null;

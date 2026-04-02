@@ -8,7 +8,8 @@
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:all": "electron-builder --win --mac",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "web": "node server.js"
   },
   "dependencies": {
     "express": "^4.22.1",
@@ -63,5 +64,6 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
-  }
+  },
+  "author": "Sonny"
 }

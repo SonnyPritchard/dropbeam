@@ -192,26 +192,19 @@ ipcMain.handle('get-self-info', () => ({
 
 ipcMain.handle('get-devices', () => getDeviceList());
 
-// Send signal to a remote peer via HTTP POST
+// Send signal to a remote peer via WebSocket (compatible with Electron + web server)
 ipcMain.handle('send-signal', async (event, { targetId, type, data, transferMeta }) => {
   const target = discoveredDevices.get(targetId);
   if (!target) throw new Error(`Device ${targetId} not found`);
 
-  const payload = JSON.stringify({ from: deviceId, type, data, transferMeta });
+  const payload = JSON.stringify({ from: deviceId, fromName: deviceName, type, data, transferMeta });
   return new Promise((resolve, reject) => {
-    const req = http.request({
-      hostname: target.host,
-      port: target.port,
-      path: '/signal',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-    }, (res) => {
-      res.resume();
-      resolve({ ok: true });
-    });
-    req.on('error', reject);
-    req.write(payload);
-    req.end();
+    let ws;
+    try { ws = new WebSocket(`ws://${target.host}:${target.port}`); }
+    catch (e) { reject(e); return; }
+    const timeout = setTimeout(() => { ws.terminate(); reject(new Error('Signal timeout')); }, 5000);
+    ws.on('open', () => { ws.send(payload); clearTimeout(timeout); ws.close(); resolve({ ok: true }); });
+    ws.on('error', (e) => { clearTimeout(timeout); reject(e); });
   });
 });
 
@@ -279,6 +272,63 @@ function formatBytes(bytes) {
   return `${(bytes / 1073741824).toFixed(2)} GB`;
 }
 
+
+// ─── Subnet Scan Fallback Discovery ─────────────────────────────────────────
+function startSubnetScan() {
+  const localIp = getLocalIp();
+  const parts = localIp.split('.');
+  if (parts.length !== 4) return;
+  const subnet = parts.slice(0, 3).join('.');
+  console.log(`[scan] Subnet scan on ${subnet}.0/24 port ${signalingPort}`);
+
+  function scanHost(ip) {
+    return new Promise((resolve) => {
+      if (ip === localIp) { resolve(null); return; }
+      const req = http.request(
+        { hostname: ip, port: signalingPort, path: '/info', method: 'GET', timeout: 600 },
+        (res) => {
+          let data = '';
+          res.on('data', d => data += d);
+          res.on('end', () => {
+            try {
+              const info = JSON.parse(data);
+              if (info.id && info.id !== deviceId) {
+                resolve({ id: info.id, name: info.name || info.id, host: ip, port: info.port || signalingPort });
+              } else { resolve(null); }
+            } catch { resolve(null); }
+          });
+        }
+      );
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+  }
+
+  async function runScan() {
+    const BATCH = 20;
+    for (let start = 1; start <= 254; start += BATCH) {
+      const batch = [];
+      for (let i = start; i < start + BATCH && i <= 254; i++) batch.push(scanHost(`${subnet}.${i}`));
+      const results = await Promise.all(batch);
+      results.forEach(r => {
+        if (!r) return;
+        const existing = discoveredDevices.get(r.id);
+        discoveredDevices.set(r.id, { ...r, lastSeen: Date.now() });
+        if (!existing && mainWindow) {
+          mainWindow.webContents.send('devices-updated', getDeviceList());
+          console.log(`[scan] Found: ${r.name} @ ${r.host}:${r.port}`);
+        }
+      });
+      await new Promise(res => setTimeout(res, 50));
+    }
+    console.log('[scan] Complete');
+  }
+
+  setTimeout(runScan, 3000);
+  setInterval(runScan, 60000);
+}
+
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -312,8 +362,8 @@ app.whenReady().then(() => {
   startSignalingServer();
   createWindow();
 
-  // Start mDNS after a short delay (so port is bound)
-  setTimeout(startMdns, 500);
+  // Start mDNS + subnet scan after a short delay (so port is bound)
+  setTimeout(() => { startMdns(); startSubnetScan(); }, 500);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
