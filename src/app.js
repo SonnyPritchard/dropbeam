@@ -31,7 +31,8 @@ function createWebAdapter() {
       wsReady = true;
       const localId = localStorage.getItem('dropbeam-id') || `peer-${Math.random().toString(36).slice(2,9)}`;
       localStorage.setItem('dropbeam-id', localId);
-      ws.send(JSON.stringify({ action: 'register', id: localId, name: navigator.platform || 'Browser' }));
+      const localName = localStorage.getItem('dropbeam-name') || navigator.platform || 'Browser';
+      ws.send(JSON.stringify({ action: 'register', id: localId, name: localName }));
       pendingMessages.forEach(m => ws.send(m));
       pendingMessages.length = 0;
     };
@@ -171,7 +172,18 @@ const ICE_SERVERS = [
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
   selfInfo = await db.getSelfInfo();
-  document.getElementById('self-name').textContent = selfInfo.name;
+  const selfNameEl = document.getElementById('self-name');
+  selfNameEl.textContent = selfInfo.name;
+  selfNameEl.title = 'Click to rename';
+  selfNameEl.style.cursor = 'pointer';
+  selfNameEl.addEventListener('click', () => {
+    const newName = prompt('Enter device name:', selfInfo.name);
+    if (newName && newName.trim()) {
+      localStorage.setItem('dropbeam-name', newName.trim());
+      selfNameEl.textContent = newName.trim();
+      showToast('Name updated', 'Reload to reconnect with new name', 'info');
+    }
+  });
 
   devices = await db.getDevices();
   renderDevices();
