@@ -18,6 +18,8 @@ function createWebAdapter() {
   let selfInfo = null;
   let devicesCallback = null;
   let signalCallback = null;
+  let pendingFromServerCallback = null;
+  let recipientOnlineCallback = null;
   let reconnectTimer = null;
   let wsReady = false;
   const pendingMessages = []; // queued while connecting
@@ -48,6 +50,14 @@ function createWebAdapter() {
       }
       if (msg.type === 'signal') {
         if (signalCallback) signalCallback({ ...msg.payload, from: msg.from });
+        return;
+      }
+      if (msg.type === 'pending-transfers') {
+        if (pendingFromServerCallback) pendingFromServerCallback(msg.transfers || []);
+        return;
+      }
+      if (msg.type === 'recipient-online') {
+        if (recipientOnlineCallback) recipientOnlineCallback(msg);
         return;
       }
     };
@@ -113,6 +123,10 @@ function createWebAdapter() {
 
     onDevicesUpdated: (cb) => { devicesCallback = cb; },
     onSignalReceived: (cb) => { signalCallback = cb; },
+    onPendingTransfers: (cb) => { pendingFromServerCallback = cb; },
+    onRecipientOnline: (cb) => { recipientOnlineCallback = cb; },
+    sendWs: (msg) => wsSend(msg),
+    getApiBase: () => isLocal ? `http://${location.host}` : 'https://dropbeam.onrender.com',
     removeAllListeners: () => {}
   };
 }
@@ -127,6 +141,12 @@ let incomingTransfers = new Map(); // transferId -> { chunks[], meta, received }
 let pendingIncoming = null; // { transferId, meta, resolve, reject }
 let dragTargetDevice = null;
 let selectedFiles = [];
+
+// Offline queuing state
+let serverPendingTransfers = []; // pending transfers delivered by server on connect
+let queuedTransfers = new Map(); // transferId -> { recipientId, files, contact }
+let pendingFromServerCallback = null;
+let recipientOnlineCallback = null;
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -163,8 +183,27 @@ async function init() {
 
   db.onSignalReceived((signal) => handleSignal(signal));
 
+  db.onPendingTransfers((transfers) => {
+    serverPendingTransfers = transfers;
+    if (transfers.length > 0) showPendingBanner(transfers);
+  });
+
+  db.onRecipientOnline(({ transferId, recipientId }) => {
+    const queued = queuedTransfers.get(transferId);
+    if (!queued) return;
+    queuedTransfers.delete(transferId);
+    log('info', `Recipient ${queued.contact.name} is online — starting transfer…`);
+    // Find the device from connected list or construct a minimal device object
+    const device = devices.find(d => d.id === recipientId) || { id: recipientId, name: queued.contact.name, host: 'signal', port: 0, relay: true };
+    sendFilesToDevice(queued.files, device);
+    // Clear the queued badge
+    renderContacts();
+  });
+
   setupDropZone();
   setupRefresh();
+  setupContacts();
+  setupPendingModal();
 
   document.getElementById('clear-log').addEventListener('click', () => {
     document.getElementById('activity-log').innerHTML = '';
@@ -175,6 +214,7 @@ async function init() {
 
 // ─── Device rendering ─────────────────────────────────────────────────────────
 function renderDevices() {
+  renderContacts(); // keep contacts in sync with online status
   const list = document.getElementById('device-list');
   if (devices.length === 0) {
     list.innerHTML = `
@@ -649,6 +689,212 @@ function showIncomingModal(fromName, fileName, fileSize) {
     acceptBtn.onclick = () => { cleanup(); resolve(true); };
     declineBtn.onclick = () => { cleanup(); resolve(false); };
   });
+}
+
+// ─── Contacts ─────────────────────────────────────────────────────────────────
+function getContacts() {
+  try { return JSON.parse(localStorage.getItem('dropbeam-contacts') || '[]'); } catch { return []; }
+}
+
+function saveContacts(contacts) {
+  localStorage.setItem('dropbeam-contacts', JSON.stringify(contacts));
+}
+
+function addContact(device) {
+  const contacts = getContacts();
+  if (contacts.find(c => c.id === device.id)) return; // already saved
+  contacts.push({ id: device.id, name: device.name, addedAt: Date.now() });
+  saveContacts(contacts);
+  renderContacts();
+  showToast('Contact saved', `${device.name} added to contacts`, 'success');
+}
+
+function removeContact(contactId) {
+  saveContacts(getContacts().filter(c => c.id !== contactId));
+  renderContacts();
+}
+
+function setupContacts() {
+  document.getElementById('save-contact-btn').addEventListener('click', () => {
+    if (devices.length === 0) {
+      showToast('No devices online', 'Connect to devices first to save them', 'warn');
+      return;
+    }
+    devices.forEach(d => addContact(d));
+  });
+  renderContacts();
+}
+
+function renderContacts() {
+  const contacts = getContacts();
+  const list = document.getElementById('contact-list');
+  if (!list) return;
+
+  if (contacts.length === 0) {
+    list.innerHTML = '<div class="no-devices" style="padding:16px;font-size:12px;">No saved contacts yet</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  const onlineIds = new Set(devices.map(d => d.id));
+
+  contacts.forEach(contact => {
+    const isOnline = onlineIds.has(contact.id);
+    const hasQueued = [...queuedTransfers.values()].some(q => q.recipientId === contact.id);
+
+    const card = document.createElement('div');
+    card.className = `device-card${isOnline ? '' : ' offline'}`;
+    card.dataset.contactId = contact.id;
+
+    card.innerHTML = `
+      <div class="device-name">
+        ${isOnline ? '💻' : '💤'} ${escHtml(contact.name)}
+        ${hasQueued ? '<span class="queued-badge">Queued</span>' : ''}
+      </div>
+      <div class="device-ip">${isOnline ? 'Online' : 'Offline'}</div>
+      <div class="contact-actions">
+        <button class="btn-icon remove-contact-btn" data-id="${escHtml(contact.id)}" title="Remove contact">Remove</button>
+      </div>
+    `;
+
+    // Remove contact
+    card.querySelector('.remove-contact-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeContact(contact.id);
+    });
+
+    if (!isOnline) {
+      // Drag & drop onto offline contact → queue
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        card.classList.add('drag-over');
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('drop', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        card.classList.remove('drag-over');
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) queueFilesForContact(files, contact);
+      });
+    }
+
+    list.appendChild(card);
+  });
+}
+
+async function queueFilesForContact(files, contact) {
+  const filesMeta = files.map(f => ({ name: f.name, size: f.size, mimeType: f.type || 'application/octet-stream' }));
+  const base = db.getApiBase ? db.getApiBase() : `http://${location.host}`;
+  try {
+    const res = await fetch(`${base}/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipientId: contact.id,
+        senderId: selfInfo.id,
+        senderName: selfInfo.name,
+        files: filesMeta
+      })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Queue failed'); }
+    const { transferId } = await res.json();
+
+    // Store so we can start transfer when recipient comes online
+    queuedTransfers.set(transferId, { recipientId: contact.id, files, contact });
+
+    log('info', `Queued ${files.length} file(s) for ${contact.name} — waiting for them to come online`);
+    showToast('Transfer queued', `Waiting for ${contact.name} to come online`, 'info');
+    renderContacts();
+  } catch (err) {
+    log('error', `Failed to queue transfer: ${err.message}`);
+    showToast('Queue failed', err.message, 'error');
+  }
+}
+
+// ─── Pending transfers banner & modal ─────────────────────────────────────────
+function showPendingBanner(transfers) {
+  const banner = document.getElementById('pending-banner');
+  if (!banner) return;
+  const total = transfers.reduce((n, t) => n + (t.files ? t.files.length : 1), 0);
+  const senders = [...new Set(transfers.map(t => t.senderName))].join(', ');
+  document.getElementById('pending-banner-text').textContent =
+    `${total} file${total !== 1 ? 's' : ''} waiting from ${senders}`;
+  banner.classList.add('active');
+}
+
+function setupPendingModal() {
+  const overlay = document.getElementById('pending-modal-overlay');
+  if (!overlay) return;
+
+  document.getElementById('pending-banner-close').addEventListener('click', () => {
+    document.getElementById('pending-banner').classList.remove('active');
+  });
+
+  document.getElementById('pending-banner-view').addEventListener('click', () => {
+    showPendingModal();
+  });
+
+  document.getElementById('pending-modal-close').addEventListener('click', () => {
+    overlay.classList.remove('active');
+  });
+}
+
+function showPendingModal() {
+  const overlay = document.getElementById('pending-modal-overlay');
+  const itemsEl = document.getElementById('pending-modal-items');
+  if (!overlay || !itemsEl) return;
+
+  itemsEl.innerHTML = '';
+  serverPendingTransfers.forEach(transfer => {
+    const filesSummary = transfer.files
+      ? transfer.files.map(f => `${f.name} (${formatBytes(f.size)})`).join(', ')
+      : 'Unknown files';
+
+    const item = document.createElement('div');
+    item.className = 'modal-pending-item';
+    item.innerHTML = `
+      <div class="item-sender">From: ${escHtml(transfer.senderName)}</div>
+      <div class="item-files">${escHtml(filesSummary)}</div>
+      <div class="item-actions">
+        <button class="btn btn-accept" data-tid="${escHtml(transfer.transferId)}" data-sid="${escHtml(transfer.senderId)}">Accept</button>
+        <button class="btn btn-decline" data-tid="${escHtml(transfer.transferId)}">Decline</button>
+      </div>
+    `;
+
+    item.querySelector('.btn-accept').addEventListener('click', async (e) => {
+      const tid = e.target.dataset.tid;
+      const sid = e.target.dataset.sid;
+      // Notify sender
+      db.sendWs({ action: 'notify-sender', senderId: sid, transferId: tid });
+      // Clear from server
+      const base = db.getApiBase ? db.getApiBase() : `http://${location.host}`;
+      await fetch(`${base}/queue/${tid}`, { method: 'DELETE' }).catch(() => {});
+      serverPendingTransfers = serverPendingTransfers.filter(t => t.transferId !== tid);
+      log('info', `Accepted queued transfer ${tid} from ${transfer.senderName}`);
+      item.remove();
+      if (serverPendingTransfers.length === 0) {
+        document.getElementById('pending-banner').classList.remove('active');
+        overlay.classList.remove('active');
+      }
+    });
+
+    item.querySelector('.btn-decline').addEventListener('click', async (e) => {
+      const tid = e.target.dataset.tid;
+      const base = db.getApiBase ? db.getApiBase() : `http://${location.host}`;
+      await fetch(`${base}/queue/${tid}`, { method: 'DELETE' }).catch(() => {});
+      serverPendingTransfers = serverPendingTransfers.filter(t => t.transferId !== tid);
+      log('warn', `Declined queued transfer from ${transfer.senderName}`);
+      item.remove();
+      if (serverPendingTransfers.length === 0) {
+        document.getElementById('pending-banner').classList.remove('active');
+        overlay.classList.remove('active');
+      }
+    });
+
+    itemsEl.appendChild(item);
+  });
+
+  overlay.classList.add('active');
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────

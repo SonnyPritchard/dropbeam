@@ -293,6 +293,98 @@
     .log-entry.info .log-msg { color: var(--text); }
     .log-entry.warn .log-msg { color: var(--warning); }
 
+    /* Contacts section */
+    .contacts-section {
+      border-top: 1px solid var(--border);
+    }
+    .contacts-header {
+      padding: 12px 16px 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .contact-list {
+      padding: 0 8px 8px;
+    }
+    .device-card.offline {
+      opacity: 0.55;
+    }
+    .device-card.offline .device-name { color: var(--text-muted); }
+    .queued-badge {
+      display: inline-block;
+      font-size: 10px;
+      background: rgba(245,158,11,0.2);
+      color: var(--warning);
+      border: 1px solid var(--warning);
+      border-radius: 4px;
+      padding: 1px 5px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .contact-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .btn-icon {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 5px;
+      padding: 2px 7px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-icon:hover { color: var(--danger); border-color: var(--danger); }
+    .save-contact-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color .2s;
+    }
+    .save-contact-btn:hover { color: var(--accent); }
+
+    /* Pending transfers banner */
+    #pending-banner {
+      display: none;
+      background: rgba(99,102,241,0.12);
+      border-bottom: 1px solid var(--accent);
+      padding: 10px 16px;
+      font-size: 13px;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    #pending-banner.active { display: flex; }
+    #pending-banner .banner-text { flex: 1; font-weight: 500; }
+    #pending-banner .banner-close {
+      background: none; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px;
+    }
+    #pending-banner .banner-close:hover { color: var(--text); }
+
+    /* Pending transfers modal */
+    .modal-pending-item {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+    .modal-pending-item .item-sender { font-weight: 600; margin-bottom: 4px; }
+    .modal-pending-item .item-files { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+    .modal-pending-item .item-actions { display: flex; gap: 8px; }
+    .modal-pending-item .item-actions .btn { flex: none; padding: 6px 14px; font-size: 12px; }
+
     /* Toast notification */
     #toast-container {
       position: fixed;
@@ -421,10 +513,29 @@
         <div>Scanning for devices…<br/>Make sure others are on the same network</div>
       </div>
     </div>
+
+    <!-- Saved Contacts -->
+    <div class="contacts-section" id="contacts-section">
+      <div class="contacts-header">
+        <span>Saved Contacts</span>
+        <button class="save-contact-btn" id="save-contact-btn" title="Save online devices as contacts">＋ Save visible</button>
+      </div>
+      <div class="contact-list" id="contact-list">
+        <div class="no-devices" style="padding: 16px; font-size: 12px;">No saved contacts yet</div>
+      </div>
+    </div>
   </div>
 
   <!-- Main area -->
   <div class="main-area">
+    <!-- Pending transfers banner -->
+    <div id="pending-banner">
+      <span>📥</span>
+      <span class="banner-text" id="pending-banner-text">You have pending transfers</span>
+      <button class="btn btn-accept" id="pending-banner-view" style="flex:none;padding:6px 14px;font-size:12px;">View</button>
+      <button class="banner-close" id="pending-banner-close" title="Dismiss">✕</button>
+    </div>
+
     <div class="drop-zone" id="drop-zone">
       <div class="drop-zone-icon">⚡</div>
       <div class="drop-zone-text">Drop files here or drag onto a device</div>
@@ -457,6 +568,18 @@
     <div class="modal-actions">
       <button class="btn btn-accept" id="modal-accept">Accept</button>
       <button class="btn btn-decline" id="modal-decline">Decline</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pending transfers modal -->
+<div class="modal-overlay" id="pending-modal-overlay">
+  <div class="modal" style="max-width:480px;width:90%">
+    <div class="modal-title">📥 Pending Transfers</div>
+    <div class="modal-desc">Files queued for you while you were offline:</div>
+    <div id="pending-modal-items"></div>
+    <div class="modal-actions" style="margin-top:8px;">
+      <button class="btn btn-decline" id="pending-modal-close">Close</button>
     </div>
   </div>
 </div>

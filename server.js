@@ -29,6 +29,9 @@ const deviceId = `${os.hostname()}-web-${Math.random().toString(36).slice(2, 7)}
 // ─── State ────────────────────────────────────────────────────────────────────
 const discoveredDevices = new Map(); // id -> { id, name, host, port, lastSeen }
 const connectedBrowsers = new Map(); // peerId -> WebSocket
+const pendingTransfers = new Map(); // recipientId -> [{ transferId, senderId, senderName, files, queuedAt }]
+const transferIndex = new Map(); // transferId -> recipientId (for fast DELETE lookup)
+const MAX_PENDING = 20;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getLocalIps() {
@@ -110,6 +113,56 @@ const httpServer = http.createServer((req, res) => {
     res.end(JSON.stringify({ id: deviceId, name: deviceName, port: SIGNAL_PORT })); return;
   }
 
+  // ─── Queue REST endpoints ────────────────────────────────────────────────────
+  if (url === '/queue' && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { recipientId, senderId, senderName, files } = JSON.parse(body);
+        if (!recipientId || !senderId || !Array.isArray(files)) {
+          res.writeHead(400); res.end(JSON.stringify({ error: 'Missing fields' })); return;
+        }
+        // Count total pending across all recipients
+        let totalPending = 0;
+        for (const arr of pendingTransfers.values()) totalPending += arr.length;
+        if (totalPending >= MAX_PENDING) {
+          res.writeHead(429); res.end(JSON.stringify({ error: 'Queue full' })); return;
+        }
+        const transferId = `t-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+        const record = { transferId, senderId, senderName: senderName || senderId, files, queuedAt: Date.now() };
+        if (!pendingTransfers.has(recipientId)) pendingTransfers.set(recipientId, []);
+        pendingTransfers.get(recipientId).push(record);
+        transferIndex.set(transferId, recipientId);
+        console.log(`[queue] Queued ${transferId} for ${recipientId} from ${senderName}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ transferId }));
+      } catch (e) { res.writeHead(400); res.end(JSON.stringify({ error: 'Bad JSON' })); }
+    });
+    return;
+  }
+
+  if (url.startsWith('/queue/') && req.method === 'GET') {
+    const peerId = url.slice(7);
+    const transfers = pendingTransfers.get(peerId) || [];
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(transfers)); return;
+  }
+
+  if (url.startsWith('/queue/') && req.method === 'DELETE') {
+    const transferId = url.slice(7);
+    const recipientId = transferIndex.get(transferId);
+    if (recipientId) {
+      const arr = pendingTransfers.get(recipientId) || [];
+      const filtered = arr.filter(t => t.transferId !== transferId);
+      if (filtered.length === 0) pendingTransfers.delete(recipientId);
+      else pendingTransfers.set(recipientId, filtered);
+      transferIndex.delete(transferId);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true })); return;
+  }
+
   serveStatic(req, res);
 });
 
@@ -163,9 +216,24 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'self-info', id: peerId, name: peerName, ip: remoteIp, port: HTTP_PORT }));
       ws.send(JSON.stringify({ type: 'devices-updated', devices: getDeviceList().filter(d => d.id !== peerId) }));
 
+      // Notify about any pending (queued) transfers
+      const pending = pendingTransfers.get(peerId);
+      if (pending && pending.length > 0) {
+        ws.send(JSON.stringify({ type: 'pending-transfers', transfers: pending }));
+      }
+
       // Tell everyone else about the new peer
       broadcastToBrowsers({ type: 'devices-updated', devices: getDeviceList() }, peerId);
       console.log(`[ws] ${peerName} (${peerId}) connected from ${remoteIp}`);
+      return;
+    }
+
+    if (msg.action === 'notify-sender') {
+      // Recipient is ready — tell the sender to start the transfer
+      const senderWs = connectedBrowsers.get(msg.senderId);
+      if (senderWs && senderWs.readyState === WebSocket.OPEN) {
+        senderWs.send(JSON.stringify({ type: 'recipient-online', transferId: msg.transferId, recipientId: peerId }));
+      }
       return;
     }
 
