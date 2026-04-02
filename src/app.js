@@ -80,8 +80,9 @@ function createWebAdapter() {
     },
 
     getDevices: async () => {
-      const res = await fetch(`http://${wsHost}:3000/devices`).catch(() => null);
-      if (res && res.ok) return res.json();
+      const base = isLocal ? `http://${location.host}` : 'https://dropbeam.onrender.com';
+      const res = await fetch(`${base}/devices`).catch(() => null);
+      if (res && res.ok) return (await res.json()).filter(d => d.id !== localStorage.getItem('dropbeam-id'));
       return [];
     },
 
