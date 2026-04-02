@@ -380,5 +380,10 @@ function startSubnetScan() {
 }
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
-startMdns();
-startSubnetScan();
+// Only run LAN discovery when not in cloud (Render sets RENDER=true)
+if (!process.env.RENDER) {
+  startMdns();
+  startSubnetScan();
+} else {
+  console.log('[discovery] Cloud mode — skipping mDNS and subnet scan');
+}
