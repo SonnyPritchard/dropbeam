@@ -35,6 +35,11 @@ function createWebAdapter() {
       ws.send(JSON.stringify({ action: 'register', id: localId, name: localName }));
       pendingMessages.forEach(m => ws.send(m));
       pendingMessages.length = 0;
+      // Keepalive ping every 30s to prevent Render's 60s WS timeout
+      const ping = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'ping' }));
+        else clearInterval(ping);
+      }, 30000);
     };
 
     ws.onmessage = ({ data }) => {

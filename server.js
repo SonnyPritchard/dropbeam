@@ -228,6 +228,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
+    if (msg.action === 'ping') { ws.send(JSON.stringify({ type: 'pong' })); return; }
     if (msg.action === 'notify-sender') {
       // Recipient is ready — tell the sender to start the transfer
       const senderWs = connectedBrowsers.get(msg.senderId);
