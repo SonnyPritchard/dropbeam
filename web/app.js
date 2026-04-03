@@ -2,6 +2,8 @@
 // Works in both Electron (via window.dropbeam preload IPC) and plain browser
 // (via WebSocket + fetch to the local DropBeam web server)
 
+const APP_VERSION = 'v1.0.0';
+
 const db = window.dropbeam || createWebAdapter();
 
 /**
@@ -1012,3 +1014,47 @@ function showPendingModal() {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 init().catch(console.error);
+
+// ─── In-app Update Check (Android / Web only) ─────────────────────────────────
+async function checkForUpdates() {
+  // Skip in Electron — it has its own auto-updater
+  if (window.dropbeam || window.electronAPI) return;
+  try {
+    const res = await fetch('https://api.github.com/repos/SonnyPritchard/dropbeam/releases/latest');
+    if (!res.ok) return;
+    const data = await res.json();
+    const latest = data.tag_name; // e.g. "v1.0.1"
+    if (!latest || latest === APP_VERSION) return;
+
+    // Show non-blocking banner
+    const banner = document.createElement('div');
+    banner.id = 'update-banner';
+    banner.style.cssText = [
+      'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:9999',
+      'background:linear-gradient(135deg,#6c63ff,#48c9b0)',
+      'color:#fff', 'padding:12px 20px', 'cursor:pointer',
+      'display:flex', 'align-items:center', 'justify-content:space-between',
+      'font-family:inherit', 'font-size:14px', 'box-shadow:0 2px 8px rgba(0,0,0,0.4)'
+    ].join(';');
+    banner.innerHTML = `
+      <span>⬆️ Update available (${latest}) — tap to download</span>
+      <button id="update-dismiss-btn" style="
+        background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.6);
+        border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;margin-left:16px;
+      ">✕</button>
+    `;
+    document.body.prepend(banner);
+
+    banner.addEventListener('click', (e) => {
+      if (e.target.id === 'update-dismiss-btn') {
+        banner.remove();
+        return;
+      }
+      window.open(data.html_url, '_blank');
+    });
+  } catch (_) {
+    // Silently ignore network errors
+  }
+}
+
+checkForUpdates();
