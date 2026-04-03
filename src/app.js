@@ -2,7 +2,7 @@
 // Works in both Electron (via window.dropbeam preload IPC) and plain browser
 // (via WebSocket + fetch to the local DropBeam web server)
 
-const APP_VERSION = 'v1.0.0';
+const APP_VERSION = 'v1.1.0';
 
 const db = window.dropbeam || createWebAdapter();
 
