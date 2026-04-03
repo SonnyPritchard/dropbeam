@@ -974,5 +974,41 @@ function showPendingModal() {
   overlay.classList.add('active');
 }
 
+// ─── Auto-Update Banner (Electron only) ──────────────────────────────────────
+(function setupUpdateBanner() {
+  if (!window.dropbeam || !window.dropbeam.onUpdateReady) return;
+
+  window.dropbeam.onUpdateAvailable(() => {
+    console.log('[updater] Update available — downloading in background...');
+  });
+
+  window.dropbeam.onUpdateReady(() => {
+    // Show non-blocking banner at the top
+    const existing = document.getElementById('update-banner');
+    if (existing) return;
+
+    const banner = document.createElement('div');
+    banner.id = 'update-banner';
+    banner.style.cssText = [
+      'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:9999',
+      'background:#6c63ff', 'color:#fff', 'padding:10px 20px',
+      'display:flex', 'align-items:center', 'justify-content:space-between',
+      'font-family:inherit', 'font-size:14px', 'box-shadow:0 2px 8px rgba(0,0,0,0.4)'
+    ].join(';');
+    banner.innerHTML = `
+      <span>⬆️ Update ready — restart to install the latest version of DropBeam</span>
+      <button id="update-restart-btn" style="
+        background:#fff;color:#6c63ff;border:none;border-radius:6px;
+        padding:6px 16px;cursor:pointer;font-weight:600;font-size:13px;margin-left:16px;
+      ">Restart &amp; Install</button>
+    `;
+    document.body.prepend(banner);
+
+    document.getElementById('update-restart-btn').addEventListener('click', () => {
+      window.dropbeam.restartAndInstall();
+    });
+  });
+})();
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 init().catch(console.error);

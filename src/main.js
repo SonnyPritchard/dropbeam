@@ -1,3 +1,4 @@
+const { autoUpdater } = require('electron-updater');
 const { app, BrowserWindow, ipcMain, dialog, Notification, shell } = require('electron');
 const path = require('path');
 const os = require('os');
@@ -358,9 +359,42 @@ function createWindow() {
   });
 }
 
+
+// ─── Auto-Update ──────────────────────────────────────────────────────────────
+function setupAutoUpdater(win) {
+  try {
+    autoUpdater.setFeedURL({ provider: 'github', owner: 'SonnyPritchard', repo: 'dropbeam' });
+
+    autoUpdater.on('update-available', () => {
+      console.log('[updater] Update available — downloading...');
+      if (win) win.webContents.send('update-available');
+    });
+
+    autoUpdater.on('update-downloaded', () => {
+      console.log('[updater] Update downloaded — ready to install');
+      if (win) win.webContents.send('update-ready');
+    });
+
+    autoUpdater.on('error', (err) => {
+      console.warn('[updater] Error:', err.message);
+    });
+
+    autoUpdater.checkForUpdatesAndNotify();
+  } catch (err) {
+    console.warn('[updater] Auto-update setup failed:', err.message);
+  }
+}
+
+ipcMain.on('restart-and-install', () => {
+  try { autoUpdater.quitAndInstall(); } catch (e) { console.warn('[updater] quitAndInstall failed:', e.message); }
+});
+
 app.whenReady().then(() => {
   startSignalingServer();
   createWindow();
+
+  // Auto-update check
+  setupAutoUpdater(mainWindow);
 
   // Start mDNS + subnet scan after a short delay (so port is bound)
   setTimeout(() => { startMdns(); startSubnetScan(); }, 500);

@@ -11,6 +11,7 @@
     "web": "node server.js"
   },
   "dependencies": {
+    "electron-updater": "^6.8.3",
     "express": "^4.22.1",
     "multicast-dns": "^7.2.5",
     "simple-peer": "^9.11.1",
@@ -62,6 +63,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "SonnyPritchard",
+      "repo": "dropbeam"
     }
   },
   "author": "Sonny"

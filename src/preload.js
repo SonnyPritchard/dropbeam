@@ -11,5 +11,10 @@ contextBridge.exposeInMainWorld('dropbeam', {
   onDevicesUpdated: (cb) => ipcRenderer.on('devices-updated', (e, devices) => cb(devices)),
   onSignalReceived: (cb) => ipcRenderer.on('signal-received', (e, data) => cb(data)),
 
-  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
+  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+
+  // Auto-update
+  onUpdateAvailable: (cb) => ipcRenderer.on('update-available', () => cb()),
+  onUpdateReady: (cb) => ipcRenderer.on('update-ready', () => cb()),
+  restartAndInstall: () => ipcRenderer.send('restart-and-install')
 });
