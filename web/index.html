@@ -472,6 +472,43 @@
     .btn-accept:hover { background: #5254cc; }
     .btn-decline { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
     .btn-decline:hover { color: var(--danger); border-color: var(--danger); }
+
+    /* ── Transfer-mode section headers ──────────────────────────────────────── */
+    .mode-section { border-top: 1px solid var(--border); }
+    .mode-section-header {
+      padding: 10px 16px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .mode-section-header:hover { color: var(--text); }
+    .mode-section-header .collapse-arrow {
+      transition: transform .2s;
+      font-size: 9px;
+      opacity: .6;
+    }
+    .mode-section.collapsed .collapse-arrow { transform: rotate(-90deg); }
+    .mode-section.collapsed .mode-section-body { display: none; }
+    .mode-section-body { padding-bottom: 4px; }
+    .section-info-block {
+      padding: 12px 16px;
+      font-size: 12px;
+    }
+    .section-info-text { color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; }
+    .section-info-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .section-info-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -493,8 +530,9 @@
 <div class="app-body">
   <!-- Sidebar: device list -->
   <div class="sidebar">
+    <!-- 🏠 LAN -->
     <div class="sidebar-header">
-      <span>Nearby Devices</span>
+      <span>🏠 LAN</span>
       <button class="refresh-btn" id="refresh-btn" title="Refresh">
         <svg id="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
@@ -511,6 +549,32 @@
           <path d="M8 21h8M12 17v4"/>
         </svg>
         <div>Scanning for devices…<br/>Make sure others are on the same network</div>
+      </div>
+    </div>
+
+    <!-- 🔒 Tailscale -->
+    <div class="mode-section" id="tailscale-section">
+      <div class="mode-section-header" id="tailscale-header">
+        <span>🔒 Tailscale</span>
+        <span class="collapse-arrow">▾</span>
+      </div>
+      <div class="mode-section-body">
+        <div id="tailscale-list">
+          <div class="no-devices" style="padding:14px;font-size:12px;">Checking Tailscale…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🌍 Internet -->
+    <div class="mode-section" id="internet-section">
+      <div class="mode-section-header" id="internet-header">
+        <span>🌍 Internet</span>
+        <span class="collapse-arrow">▾</span>
+      </div>
+      <div class="mode-section-body">
+        <div id="internet-list">
+          <div class="no-devices" style="padding:14px;font-size:12px;">No remote devices online</div>
+        </div>
       </div>
     </div>
 

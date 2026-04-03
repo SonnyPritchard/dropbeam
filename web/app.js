@@ -142,6 +142,9 @@ function createWebAdapter() {
 // ─── State ────────────────────────────────────────────────────────────────────
 let selfInfo = null;
 let devices = [];
+let tailscalePeers = []; // { name, ip, os, online }
+let tailscaleAvailable = false;
+let internetDevices = []; // devices from Render server
 let devicePeerConns = new Map(); // deviceId -> RTCPeerConnection
 let deviceDataChannels = new Map(); // deviceId -> RTCDataChannel
 let pendingTransfers = new Map(); // transferId -> { resolve, reject }
@@ -202,6 +205,18 @@ async function init() {
 
   db.onSignalReceived((signal) => handleSignal(signal));
 
+  // Tailscale — web/Android: informational only (no CLI access)
+  renderTailscale();
+
+  // Internet (Render)
+  await loadInternetDevices();
+  if (db.onInternetDevicesUpdated) {
+    db.onInternetDevicesUpdated((updated) => {
+      internetDevices = filterInternetDevices(updated);
+      renderInternetDevices();
+    });
+  }
+
   db.onPendingTransfers((transfers) => {
     serverPendingTransfers = transfers;
     if (transfers.length > 0) showPendingBanner(transfers);
@@ -229,6 +244,15 @@ async function init() {
   });
 
   log('info', `DropBeam started as "${selfInfo.name}" (${selfInfo.ip}:${selfInfo.port})`);
+
+  // Wire up collapsible section headers
+  ['tailscale-header', 'internet-header'].forEach(id => {
+    const header = document.getElementById(id);
+    if (!header) return;
+    header.addEventListener('click', () => {
+      header.closest('.mode-section').classList.toggle('collapsed');
+    });
+  });
 }
 
 // ─── Device rendering ─────────────────────────────────────────────────────────
@@ -300,6 +324,75 @@ function setDeviceProgress(deviceId, pct) {
       fill.style.width = '0%';
     }
   }
+}
+
+// ─── Tailscale Sidebar Section ───────────────────────────────────────────────
+function renderTailscale() {
+  const list = document.getElementById('tailscale-list');
+  if (!list) return;
+  // Web/Android: always informational
+  list.innerHTML = `
+    <div class="section-info-block">
+      <div class="section-info-text">Install the Tailscale app to transfer files over your Tailnet</div>
+      <a class="section-info-link" href="https://tailscale.com/download" target="_blank" rel="noopener">Open Tailscale ↗</a>
+    </div>`;
+}
+
+// ─── Internet (Render) Sidebar Section ───────────────────────────────────────
+function filterInternetDevices(all) {
+  if (!selfInfo) return all;
+  const lanIds = new Set(devices.map(d => d.id));
+  return all.filter(d => d.id !== selfInfo.id && !lanIds.has(d.id));
+}
+
+async function loadInternetDevices() {
+  try {
+    const base = db.getApiBase ? db.getApiBase() : 'https://dropbeam.onrender.com';
+    const res = await fetch(`${base}/devices`).catch(() => null);
+    if (res && res.ok) {
+      const all = await res.json();
+      internetDevices = filterInternetDevices(Array.isArray(all) ? all : []);
+    }
+  } catch (e) {
+    internetDevices = [];
+  }
+  renderInternetDevices();
+  setTimeout(loadInternetDevices, 30000);
+}
+
+function renderInternetDevices() {
+  const list = document.getElementById('internet-list');
+  if (!list) return;
+
+  if (internetDevices.length === 0) {
+    list.innerHTML = `<div class="no-devices" style="padding:14px;font-size:12px;">No remote devices online</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  internetDevices.forEach(device => {
+    const card = document.createElement('div');
+    card.className = 'device-card';
+    card.dataset.deviceId = device.id;
+    card.innerHTML = `
+      <div class="device-name">🌍 ${escHtml(device.name || device.id)}</div>
+      <div class="device-ip">Via Render · Internet</div>
+      <div class="device-status idle" id="status-${cssId(device.id)}">Ready to receive</div>
+      <div class="device-progress" id="progress-${cssId(device.id)}">
+        <div class="device-progress-fill" id="progress-fill-${cssId(device.id)}" style="width:0%"></div>
+      </div>`;
+
+    card.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      card.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) sendFilesToDevice(files, { ...device, internet: true });
+    });
+
+    list.appendChild(card);
+  });
 }
 
 // ─── Drop zone (global drop target) ──────────────────────────────────────────

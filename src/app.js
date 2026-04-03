@@ -142,6 +142,9 @@ function createWebAdapter() {
 // ─── State ────────────────────────────────────────────────────────────────────
 let selfInfo = null;
 let devices = [];
+let tailscalePeers = []; // { name, ip, os, online }
+let tailscaleAvailable = false;
+let internetDevices = []; // devices from Render server
 let devicePeerConns = new Map(); // deviceId -> RTCPeerConnection
 let deviceDataChannels = new Map(); // deviceId -> RTCDataChannel
 let pendingTransfers = new Map(); // transferId -> { resolve, reject }
@@ -202,6 +205,37 @@ async function init() {
 
   db.onSignalReceived((signal) => handleSignal(signal));
 
+  // ── Tailscale ────────────────────────────────────────────────────────────
+  if (window.dropbeam && window.dropbeam.tailscale) {
+    const tsResult = await window.dropbeam.tailscale.getPeers().catch(() => ({ available: false }));
+    tailscaleAvailable = tsResult.available === true;
+    tailscalePeers = tsResult.peers || [];
+    renderTailscale();
+
+    window.dropbeam.tailscale.onProgress((pct) => {
+      // Update any active Tailscale peer progress bars
+      tailscalePeers.forEach(p => setTailscaleProgress(p.ip, pct));
+    });
+  } else {
+    // web / Android — render informational block
+    renderTailscale();
+  }
+
+  // ── Internet (Render) ─────────────────────────────────────────────────────
+  await loadInternetDevices();
+
+  if (window.dropbeam && window.dropbeam.internet) {
+    window.dropbeam.internet.onDevicesUpdated((updated) => {
+      internetDevices = filterInternetDevices(updated);
+      renderInternetDevices();
+    });
+  } else if (db.onInternetDevicesUpdated) {
+    db.onInternetDevicesUpdated((updated) => {
+      internetDevices = filterInternetDevices(updated);
+      renderInternetDevices();
+    });
+  }
+
   db.onPendingTransfers((transfers) => {
     serverPendingTransfers = transfers;
     if (transfers.length > 0) showPendingBanner(transfers);
@@ -229,6 +263,15 @@ async function init() {
   });
 
   log('info', `DropBeam started as "${selfInfo.name}" (${selfInfo.ip}:${selfInfo.port})`);
+
+  // Wire up collapsible section headers
+  ['tailscale-header', 'internet-header'].forEach(id => {
+    const header = document.getElementById(id);
+    if (!header) return;
+    header.addEventListener('click', () => {
+      header.closest('.mode-section').classList.toggle('collapsed');
+    });
+  });
 }
 
 // ─── Device rendering ─────────────────────────────────────────────────────────
@@ -300,6 +343,167 @@ function setDeviceProgress(deviceId, pct) {
       fill.style.width = '0%';
     }
   }
+}
+
+// ─── Tailscale Sidebar Section ───────────────────────────────────────────────
+function renderTailscale() {
+  const section = document.getElementById('tailscale-section');
+  const list = document.getElementById('tailscale-list');
+  if (!section || !list) return;
+
+  const isElectron = !!(window.dropbeam && window.dropbeam.tailscale);
+
+  if (!isElectron) {
+    // Web / Android: informational only
+    list.innerHTML = `
+      <div class="section-info-block">
+        <div class="section-info-text">Install the Tailscale app to transfer files over your Tailnet</div>
+        <a class="section-info-link" href="https://tailscale.com/download" target="_blank" rel="noopener">Open Tailscale ↗</a>
+      </div>`;
+    return;
+  }
+
+  if (!tailscaleAvailable) {
+    list.innerHTML = `<div class="no-devices" style="padding:14px;font-size:12px;">Tailscale not installed</div>`;
+    return;
+  }
+
+  if (tailscalePeers.length === 0) {
+    list.innerHTML = `<div class="no-devices" style="padding:14px;font-size:12px;">No Tailscale peers found</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  tailscalePeers.forEach(peer => {
+    const card = document.createElement('div');
+    card.className = `device-card${peer.online ? '' : ' offline'}`;
+    card.dataset.peerIp = peer.ip;
+    card.innerHTML = `
+      <div class="device-name">🔒 ${escHtml(peer.name)}</div>
+      <div class="device-ip">${escHtml(peer.ip)} · ${escHtml(peer.os)}</div>
+      <div class="device-status ${peer.online ? 'idle' : ''}" id="ts-status-${cssId(peer.ip)}">${peer.online ? 'Ready' : 'Offline'}</div>
+      <div class="device-progress" id="ts-progress-${cssId(peer.ip)}">
+        <div class="device-progress-fill" id="ts-progress-fill-${cssId(peer.ip)}" style="width:0%"></div>
+      </div>`;
+
+    if (peer.online) {
+      card.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); card.classList.add('drag-over'); });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('drop', async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        card.classList.remove('drag-over');
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) sendFilesViaTailscale(files, peer);
+      });
+    }
+
+    list.appendChild(card);
+  });
+}
+
+function setTailscaleProgress(peerIp, pct) {
+  const bar = document.getElementById(`ts-progress-${cssId(peerIp)}`);
+  const fill = document.getElementById(`ts-progress-fill-${cssId(peerIp)}`);
+  const status = document.getElementById(`ts-status-${cssId(peerIp)}`);
+  if (bar && fill) {
+    if (pct >= 0 && pct <= 100) {
+      bar.classList.add('active');
+      fill.style.width = `${pct}%`;
+      if (status) { status.textContent = pct < 100 ? `Sending… ${pct}%` : '✓ Sent'; status.className = 'device-status sending'; }
+    } else {
+      bar.classList.remove('active');
+      fill.style.width = '0%';
+      if (status) { status.textContent = 'Ready'; status.className = 'device-status idle'; }
+    }
+  }
+}
+
+async function sendFilesViaTailscale(files, peer) {
+  if (!window.dropbeam || !window.dropbeam.tailscale) return;
+  for (const file of files) {
+    log('info', `Tailscale: sending "${file.name}" to ${peer.name}…`);
+    setTailscaleProgress(peer.ip, 0);
+    // We need the real path — use readFile IPC to get it, but for Tailscale we
+    // need the actual filesystem path. Use the file's path property (Electron exposes it).
+    const filePath = file.path; // Electron File objects have .path
+    if (!filePath) {
+      showToast('Tailscale error', 'Cannot read file path — drag from file manager', 'error');
+      setTailscaleProgress(peer.ip, -1);
+      continue;
+    }
+    try {
+      await window.dropbeam.tailscale.sendFile({ filePath, peerIp: peer.ip });
+      setTailscaleProgress(peer.ip, 100);
+      log('success', `Tailscale: "${file.name}" sent to ${peer.name}`);
+      showToast('Sent via Tailscale', `"${file.name}" delivered to ${peer.name}`, 'success');
+      setTimeout(() => setTailscaleProgress(peer.ip, -1), 3000);
+    } catch (err) {
+      setTailscaleProgress(peer.ip, -1);
+      log('error', `Tailscale send failed: ${err.message}`);
+      showToast('Tailscale failed', err.message, 'error');
+    }
+  }
+}
+
+// ─── Internet (Render) Sidebar Section ───────────────────────────────────────
+function filterInternetDevices(all) {
+  if (!selfInfo) return all;
+  const lanIds = new Set(devices.map(d => d.id));
+  return all.filter(d => d.id !== selfInfo.id && !lanIds.has(d.id));
+}
+
+async function loadInternetDevices() {
+  try {
+    let all = [];
+    if (window.dropbeam && window.dropbeam.internet) {
+      all = await window.dropbeam.internet.getDevices();
+    } else {
+      const base = db.getApiBase ? db.getApiBase() : 'https://dropbeam.onrender.com';
+      const res = await fetch(`${base}/devices`).catch(() => null);
+      if (res && res.ok) all = await res.json();
+    }
+    internetDevices = filterInternetDevices(Array.isArray(all) ? all : []);
+  } catch (e) {
+    internetDevices = [];
+  }
+  renderInternetDevices();
+  // Refresh every 30s
+  setTimeout(loadInternetDevices, 30000);
+}
+
+function renderInternetDevices() {
+  const list = document.getElementById('internet-list');
+  if (!list) return;
+
+  if (internetDevices.length === 0) {
+    list.innerHTML = `<div class="no-devices" style="padding:14px;font-size:12px;">No remote devices online</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  internetDevices.forEach(device => {
+    const card = document.createElement('div');
+    card.className = 'device-card';
+    card.dataset.deviceId = device.id;
+    card.innerHTML = `
+      <div class="device-name">🌍 ${escHtml(device.name || device.id)}</div>
+      <div class="device-ip">Via Render · Internet</div>
+      <div class="device-status idle" id="status-${cssId(device.id)}">Ready to receive</div>
+      <div class="device-progress" id="progress-${cssId(device.id)}">
+        <div class="device-progress-fill" id="progress-fill-${cssId(device.id)}" style="width:0%"></div>
+      </div>`;
+
+    card.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      card.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) sendFilesToDevice(files, { ...device, internet: true });
+    });
+
+    list.appendChild(card);
+  });
 }
 
 // ─── Drop zone (global drop target) ──────────────────────────────────────────
@@ -426,6 +630,30 @@ async function sendOneFile(file, device) {
   }
 }
 
+// ─── Signal routing helper ────────────────────────────────────────────────────
+// Routes via Render WS for internet peers, local signaling for LAN peers
+async function routeSignal({ targetId, type, data, transferMeta }) {
+  // Check if target is an internet-only device (not in LAN devices list)
+  const isInternet = !devices.find(d => d.id === targetId) &&
+                     internetDevices.find(d => d.id === targetId);
+
+  if (isInternet && window.dropbeam && window.dropbeam.internet) {
+    return window.dropbeam.internet.sendSignal({
+      action: 'forward',
+      targetId,
+      payload: { from: selfInfo?.id, fromName: selfInfo?.name, type, data, transferMeta }
+    });
+  } else if (isInternet && db.sendWs) {
+    db.sendWs({
+      action: 'forward',
+      targetId,
+      payload: { from: selfInfo?.id, fromName: selfInfo?.name, type, data, transferMeta }
+    });
+    return { ok: true };
+  }
+  return db.sendSignal({ targetId, type, data, transferMeta });
+}
+
 // ─── WebRTC Connection Management ─────────────────────────────────────────────
 async function getOrCreateConnection(device, transferId) {
   // Always create a fresh connection per transfer for simplicity
@@ -436,7 +664,7 @@ async function getOrCreateConnection(device, transferId) {
   // ICE candidate exchange via signaling server
   pc.onicecandidate = async ({ candidate }) => {
     if (candidate) {
-      await db.sendSignal({
+      await routeSignal({
         targetId: device.id,
         type: 'ice-candidate',
         data: { candidate, transferId }
@@ -451,7 +679,7 @@ async function getOrCreateConnection(device, transferId) {
   await pc.setLocalDescription(offer);
 
   // Send offer via signaling
-  await db.sendSignal({
+  await routeSignal({
     targetId: device.id,
     type: 'offer',
     data: { sdp: offer, transferId }
@@ -502,7 +730,7 @@ async function handleOffer(fromId, { sdp, transferId }) {
 
   pc.onicecandidate = async ({ candidate }) => {
     if (candidate) {
-      await db.sendSignal({
+      await routeSignal({
         targetId: fromId,
         type: 'ice-candidate',
         data: { candidate, transferId }
@@ -519,7 +747,7 @@ async function handleOffer(fromId, { sdp, transferId }) {
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
 
-  await db.sendSignal({
+  await routeSignal({
     targetId: fromId,
     type: 'answer',
     data: { sdp: answer, transferId }
@@ -607,7 +835,7 @@ function setupReceiverChannel(channel, fromId, transferId) {
         if (state) state.fileWriter = fileWriter;
       }
 
-      await db.sendSignal({
+      await routeSignal({
         targetId: fromId,
         type: accepted ? 'transfer-accepted' : 'transfer-declined',
         data: { transferId: msg.transferId }

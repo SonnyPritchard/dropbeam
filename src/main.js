@@ -330,6 +330,156 @@ function startSubnetScan() {
   setInterval(runScan, 60000);
 }
 
+
+// ─── Tailscale Integration ────────────────────────────────────────────────────
+const { exec: cpExec } = require('child_process');
+const https = require('https');
+
+async function getTailscalePeers() {
+  return new Promise((resolve) => {
+    cpExec('tailscale status --json', { timeout: 5000 }, (err, stdout) => {
+      if (err) {
+        // Check if tailscale simply isn't installed vs. other error
+        if (err.code === 127 || err.message?.includes('not found') || err.message?.includes('ENOENT')) {
+          return resolve({ available: false, reason: 'not-installed' });
+        }
+        return resolve({ available: false, reason: err.message });
+      }
+      try {
+        const status = JSON.parse(stdout);
+        const peers = Object.values(status.Peer || {}).map(p => ({
+          name: (p.HostName || p.DNSName || '').replace(/\.$/, ''),
+          ip: (p.TailscaleIPs || [])[0] || null,
+          os: p.OS || 'unknown',
+          online: p.Online === true
+        })).filter(p => p.ip);
+        resolve({ available: true, self: status.Self?.HostName || os.hostname(), peers });
+      } catch (parseErr) {
+        resolve({ available: false, reason: 'parse-error' });
+      }
+    });
+  });
+}
+
+ipcMain.handle('tailscale:getPeers', () => getTailscalePeers());
+
+ipcMain.handle('tailscale:sendFile', async (event, { filePath, peerIp }) => {
+  return new Promise((resolve, reject) => {
+    if (!filePath || !peerIp) return reject(new Error('filePath and peerIp required'));
+
+    // tailscale file cp <file> <ip>:
+    const child = cpExec(
+      `tailscale file cp "${filePath.replace(/"/g, '\\"')}" "${peerIp}:"`,
+      { timeout: 300000 },
+      (err) => {
+        if (err) reject(new Error(err.message));
+        else resolve({ ok: true });
+      }
+    );
+
+    // Tailscale file cp doesn't emit progress — show indeterminate via fake ticks
+    let pct = 0;
+    const tick = setInterval(() => {
+      pct = Math.min(pct + 5, 90);
+      if (mainWindow) mainWindow.webContents.send('tailscale:progress', pct);
+    }, 500);
+
+    child.on('close', () => {
+      clearInterval(tick);
+      if (mainWindow) mainWindow.webContents.send('tailscale:progress', 100);
+    });
+  });
+});
+
+// ─── Internet (Render) Integration ───────────────────────────────────────────
+const RENDER_API = 'https://dropbeam.onrender.com';
+let renderWs = null;
+let renderWsReady = false;
+const renderPendingMessages = [];
+
+function connectToPublicSignal() {
+  if (renderWs) return; // already connecting/connected
+
+  try {
+    renderWs = new WebSocket('wss://dropbeam.onrender.com');
+  } catch (e) {
+    console.warn('[internet] WebSocket init failed:', e.message);
+    return;
+  }
+
+  renderWs.on('open', () => {
+    renderWsReady = true;
+    console.log('[internet] Connected to Render signal server');
+    // Register
+    renderWs.send(JSON.stringify({ action: 'register', id: deviceId, name: deviceName }));
+    // Flush pending
+    renderPendingMessages.forEach(m => renderWs.send(m));
+    renderPendingMessages.length = 0;
+    // Keepalive
+    const ping = setInterval(() => {
+      if (renderWs && renderWs.readyState === WebSocket.OPEN) {
+        renderWs.send(JSON.stringify({ action: 'ping' }));
+      } else {
+        clearInterval(ping);
+      }
+    }, 30000);
+  });
+
+  renderWs.on('message', (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      // Forward signals to renderer — same handling as local signals
+      if (msg.type === 'signal' || msg.type === 'offer' || msg.type === 'answer' || msg.type === 'ice-candidate') {
+        if (mainWindow) mainWindow.webContents.send('signal-received', msg.payload || msg);
+        return;
+      }
+      if (msg.type === 'devices-updated') {
+        if (mainWindow) mainWindow.webContents.send('internet-devices-updated', msg.devices || []);
+        return;
+      }
+      // Generic passthrough to renderer
+      if (mainWindow) mainWindow.webContents.send('render-ws-message', msg);
+    } catch (e) {}
+  });
+
+  renderWs.on('close', () => {
+    renderWsReady = false;
+    renderWs = null;
+    console.log('[internet] Render WS closed — reconnecting in 5s');
+    setTimeout(connectToPublicSignal, 5000);
+  });
+
+  renderWs.on('error', (e) => {
+    console.warn('[internet] Render WS error:', e.message);
+    // close event will fire and trigger reconnect
+  });
+}
+
+ipcMain.handle('internet:getDevices', async () => {
+  return new Promise((resolve) => {
+    https.get(`${RENDER_API}/devices`, { timeout: 8000 }, (res) => {
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve([]); }
+      });
+    }).on('error', () => resolve([]));
+  });
+});
+
+// Forward a signal via Render WS (for internet peers)
+ipcMain.handle('internet:sendSignal', async (event, payload) => {
+  const msg = JSON.stringify(payload);
+  if (renderWsReady && renderWs?.readyState === WebSocket.OPEN) {
+    renderWs.send(msg);
+  } else {
+    renderPendingMessages.push(msg);
+  }
+  return { ok: true };
+});
+
+
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -397,7 +547,7 @@ app.whenReady().then(() => {
   setupAutoUpdater(mainWindow);
 
   // Start mDNS + subnet scan after a short delay (so port is bound)
-  setTimeout(() => { startMdns(); startSubnetScan(); }, 500);
+  setTimeout(() => { startMdns(); startSubnetScan(); connectToPublicSignal(); }, 500);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -407,5 +557,6 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (mdns) mdns.destroy();
   if (signalingServer) signalingServer.close();
+  if (renderWs) { try { renderWs.terminate(); } catch(e) {} }
   if (process.platform !== 'darwin') app.quit();
 });

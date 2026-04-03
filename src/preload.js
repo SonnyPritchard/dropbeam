@@ -16,5 +16,21 @@ contextBridge.exposeInMainWorld('dropbeam', {
   // Auto-update
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', () => cb()),
   onUpdateReady: (cb) => ipcRenderer.on('update-ready', () => cb()),
-  restartAndInstall: () => ipcRenderer.send('restart-and-install')
+  restartAndInstall: () => ipcRenderer.send('restart-and-install'),
+
+  // Tailscale
+  tailscale: {
+    getPeers: () => ipcRenderer.invoke('tailscale:getPeers'),
+    sendFile: (args) => ipcRenderer.invoke('tailscale:sendFile', args),
+    onProgress: (cb) => ipcRenderer.on('tailscale:progress', (e, pct) => cb(pct)),
+    offProgress: () => ipcRenderer.removeAllListeners('tailscale:progress')
+  },
+
+  // Internet (Render)
+  internet: {
+    getDevices: () => ipcRenderer.invoke('internet:getDevices'),
+    sendSignal: (payload) => ipcRenderer.invoke('internet:sendSignal', payload),
+    onDevicesUpdated: (cb) => ipcRenderer.on('internet-devices-updated', (e, devices) => cb(devices)),
+    onMessage: (cb) => ipcRenderer.on('render-ws-message', (e, msg) => cb(msg))
+  }
 });
