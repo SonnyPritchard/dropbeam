@@ -537,21 +537,45 @@ function setupReceiverChannel(channel, fromId, transferId) {
       const state = incomingTransfers.get(tId);
       if (!state) return;
 
-      state.chunks.push(data);
       state.received += data.byteLength;
       const pct = Math.min(100, Math.round((state.received / state.fileSize) * 100));
       log('info', `Receiving… ${pct}%`);
 
-      if (final) {
+      if (state.fileWriter) {
+        // File System Access API — stream chunk directly to disk
         try {
-          const blob = new Blob(state.chunks);
-          const { filePath } = await db.saveFile({ fileName: state.fileName, blob });
-          log('success', `Received "${state.fileName}" from ${state.fromName} → ${filePath}`);
-          showToast('File received!', `"${state.fileName}" saved`, 'success');
-          incomingTransfers.delete(tId);
+          await state.fileWriter.write(data);
         } catch (err) {
-          log('error', `Failed to save "${state.fileName}": ${err.message}`);
+          log('error', `Disk write failed for "${state.fileName}": ${err.message}`);
+          await state.fileWriter.abort().catch(() => {});
+          state.fileWriter = null;
+          state.chunks = []; // can't recover partial write — signal error
         }
+      } else {
+        // In-memory fallback
+        state.chunks.push(data);
+      }
+
+      if (final) {
+        if (state.fileWriter) {
+          try {
+            await state.fileWriter.close();
+            log('success', `Received "${state.fileName}" from ${state.fromName} — saved to disk`);
+            showToast('File received!', `"${state.fileName}" saved to disk`, 'success');
+          } catch (err) {
+            log('error', `Failed to finalise disk write for "${state.fileName}": ${err.message}`);
+          }
+        } else {
+          try {
+            const blob = new Blob(state.chunks);
+            const { filePath } = await db.saveFile({ fileName: state.fileName, blob });
+            log('success', `Received "${state.fileName}" from ${state.fromName} → ${filePath}`);
+            showToast('File received!', `"${state.fileName}" saved`, 'success');
+          } catch (err) {
+            log('error', `Failed to save "${state.fileName}": ${err.message}`);
+          }
+        }
+        incomingTransfers.delete(tId);
       }
       return;
     }
@@ -566,14 +590,20 @@ function setupReceiverChannel(channel, fromId, transferId) {
         fileName: msg.fileName,
         fileSize: msg.fileSize,
         fromName: msg.fromName,
-        chunks: [],
+        fileWriter: null,  // set after accept if File System Access API is used
+        chunks: [],        // fallback in-memory buffer
         received: 0
       });
 
-      const accepted = await showIncomingModal(msg.fromName, msg.fileName, msg.fileSize);
+      const { accepted, fileWriter } = await showIncomingModal(msg.fromName, msg.fileName, msg.fileSize);
       log(accepted ? 'info' : 'warn', accepted
         ? `Accepted "${msg.fileName}" from ${msg.fromName}`
         : `Declined "${msg.fileName}" from ${msg.fromName}`);
+
+      if (accepted && fileWriter) {
+        const state = incomingTransfers.get(msg.transferId);
+        if (state) state.fileWriter = fileWriter;
+      }
 
       await db.sendSignal({
         targetId: fromId,
@@ -689,11 +719,27 @@ function log(type, msg) {
 }
 
 // ─── Incoming transfer modal ──────────────────────────────────────────────────
+// Returns { accepted: bool, fileWriter: FileSystemWritableFileStream|null }
+// showSaveFilePicker is called inside the accept button click handler so it
+// runs within the user gesture context required by the File System Access API.
 function showIncomingModal(fromName, fileName, fileSize) {
   return new Promise((resolve) => {
     document.getElementById('modal-desc').textContent = `${fromName} wants to send you a file`;
     document.getElementById('modal-file-name').textContent = fileName;
     document.getElementById('modal-file-size').textContent = formatBytes(fileSize);
+
+    // Show save method hint based on File System Access API availability
+    const hasFSA = typeof window.showSaveFilePicker === 'function';
+    let hintEl = document.getElementById('modal-save-hint');
+    if (!hintEl) {
+      hintEl = document.createElement('div');
+      hintEl.id = 'modal-save-hint';
+      hintEl.style.cssText = 'font-size:12px;color:#888;margin-top:6px;';
+      document.getElementById('modal-file-size').insertAdjacentElement('afterend', hintEl);
+    }
+    hintEl.textContent = hasFSA
+      ? '💾 Will save directly to disk (streaming — supports large files)'
+      : '📥 Will download when transfer is complete';
 
     const overlay = document.getElementById('modal-overlay');
     overlay.classList.add('active');
@@ -703,8 +749,22 @@ function showIncomingModal(fromName, fileName, fileSize) {
 
     const cleanup = () => overlay.classList.remove('active');
 
-    acceptBtn.onclick = () => { cleanup(); resolve(true); };
-    declineBtn.onclick = () => { cleanup(); resolve(false); };
+    acceptBtn.onclick = async () => {
+      cleanup();
+      let fileWriter = null;
+      if (typeof window.showSaveFilePicker === 'function') {
+        try {
+          const handle = await window.showSaveFilePicker({ suggestedName: fileName });
+          fileWriter = await handle.createWritable();
+        } catch (e) {
+          // User cancelled the save picker or API unavailable — fall back to in-memory
+          fileWriter = null;
+        }
+      }
+      resolve({ accepted: true, fileWriter });
+    };
+
+    declineBtn.onclick = () => { cleanup(); resolve({ accepted: false, fileWriter: null }); };
   });
 }
 
