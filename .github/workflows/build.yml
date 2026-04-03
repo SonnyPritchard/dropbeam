@@ -18,7 +18,7 @@ jobs:
         run: npm install
 
       - name: Build macOS DMG
-        run: npx electron-builder --mac dmg
+        run: npx electron-builder --mac dmg --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -41,7 +41,7 @@ jobs:
         run: npm install
 
       - name: Build Windows installer
-        run: npx electron-builder --win nsis
+        run: npx electron-builder --win nsis --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
