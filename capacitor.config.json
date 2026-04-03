@@ -1,0 +1,8 @@
+{
+  "appId": "com.dropbeam.app",
+  "appName": "DropBeam",
+  "webDir": "web",
+  "server": {
+    "androidScheme": "https"
+  }
+}
