@@ -441,6 +441,41 @@
       font-size: 12px;
     }
     .section-info-link:hover { text-decoration: underline; }
+
+    /* ── User badge ─────────────────────────────────────────── */
+    .user-badge {
+      border-top: 1px solid var(--border);
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .user-avatar {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+    .user-info { flex: 1; min-width: 0; }
+    .user-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .user-connect-status { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+    .connect-dot {
+      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+      background: var(--text-muted);
+    }
+    .connect-dot.connected { background: var(--success); box-shadow: 0 0 5px var(--success); }
+    .connect-dot.connecting { background: var(--warning); animation: pulse 1.5s infinite; }
+    .connect-dot.not-installed { background: var(--warning); }
+    .signout-btn {
+      background: none; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 11px; padding: 4px 8px;
+      border-radius: 5px; transition: color .2s;
+      flex-shrink: 0;
+    }
+    .signout-btn:hover { color: var(--danger); }
   </style>
 </head>
 <body>
@@ -519,6 +554,19 @@
       <div class="contact-list" id="contact-list">
         <div class="no-devices" style="padding: 16px; font-size: 12px;">No saved contacts yet</div>
       </div>
+    </div>
+
+    <!-- User badge -->
+    <div class="user-badge" id="user-badge" style="display:none;">
+      <div class="user-avatar" id="user-avatar">?</div>
+      <div class="user-info">
+        <div class="user-name" id="user-display-name">—</div>
+        <div class="user-connect-status">
+          <span class="connect-dot" id="connect-dot"></span>
+          <span id="connect-status-text">DropBeam Connect</span>
+        </div>
+      </div>
+      <button class="signout-btn" id="signout-btn" title="Sign out">⏏</button>
     </div>
   </div>
 

@@ -23,7 +23,8 @@ contextBridge.exposeInMainWorld('dropbeam', {
     getPeers: () => ipcRenderer.invoke('tailscale:getPeers'),
     sendFile: (args) => ipcRenderer.invoke('tailscale:sendFile', args),
     onProgress: (cb) => ipcRenderer.on('tailscale:progress', (e, pct) => cb(pct)),
-    offProgress: () => ipcRenderer.removeAllListeners('tailscale:progress')
+    offProgress: () => ipcRenderer.removeAllListeners('tailscale:progress'),
+    onConnectStatus: (cb) => ipcRenderer.on('tailscale:connectStatus', (e, status) => cb(status))
   },
 
   // Internet (Render)
@@ -32,5 +33,16 @@ contextBridge.exposeInMainWorld('dropbeam', {
     sendSignal: (payload) => ipcRenderer.invoke('internet:sendSignal', payload),
     onDevicesUpdated: (cb) => ipcRenderer.on('internet-devices-updated', (e, devices) => cb(devices)),
     onMessage: (cb) => ipcRenderer.on('render-ws-message', (e, msg) => cb(msg))
+  },
+
+  // Auth & DropBeam Connect
+  auth: {
+    saveToken: (token, user) => ipcRenderer.invoke('auth:saveToken', { token, user }),
+    clearToken: () => ipcRenderer.invoke('auth:clearToken'),
+    getUser: () => ipcRenderer.invoke('auth:getUser'),
+    loadApp: () => ipcRenderer.invoke('auth:loadApp'),
+    getServerUrl: () => ipcRenderer.sendSync('auth:getServerUrl'),
+    logout: () => ipcRenderer.invoke('auth:logout'),
+    onConnectStatus: (cb) => ipcRenderer.on('tailscale:connectStatus', (e, status) => cb(status))
   }
 });

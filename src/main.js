@@ -498,7 +498,23 @@ function createWindow() {
     icon: path.join(__dirname, '../assets/icon.png')
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  // Auth check: verify stored JWT, load login or main app
+  const auth = readAuthFile();
+  if (auth && auth.token) {
+    verifyToken(auth.token).then(user => {
+      if (user) {
+        mainWindow.loadFile(path.join(__dirname, 'index.html'));
+        startDropbeamConnect(auth.token).catch(console.error);
+      } else {
+        deleteAuthFile();
+        mainWindow.loadFile(path.join(__dirname, 'login.html'));
+      }
+    }).catch(() => {
+      mainWindow.loadFile(path.join(__dirname, 'index.html'));
+    });
+  } else {
+    mainWindow.loadFile(path.join(__dirname, 'login.html'));
+  }
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -554,9 +570,170 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  if (connectStarted) {
+    try { require('child_process').execSync('tailscale down', { timeout: 3000 }); } catch {}
+  }
+});
+
 app.on('window-all-closed', () => {
   if (mdns) mdns.destroy();
   if (signalingServer) signalingServer.close();
   if (renderWs) { try { renderWs.terminate(); } catch(e) {} }
   if (process.platform !== 'darwin') app.quit();
+});
+
+
+// ─── DropBeam Connect — Auth & WireGuard ──────────────────────────────────────
+const DROPBEAM_SERVER = process.env.DROPBEAM_SERVER || 'http://localhost:3001';
+const AUTH_FILE = path.join(os.homedir(), '.dropbeam', 'auth.json');
+
+let connectStarted = false; // track if we started tailscale
+
+function ensureDropbeamDir() {
+  const dir = path.join(os.homedir(), '.dropbeam');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function readAuthFile() {
+  try {
+    ensureDropbeamDir();
+    if (!fs.existsSync(AUTH_FILE)) return null;
+    return JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+  } catch { return null; }
+}
+
+function writeAuthFile(data) {
+  ensureDropbeamDir();
+  fs.writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function deleteAuthFile() {
+  try { if (fs.existsSync(AUTH_FILE)) fs.unlinkSync(AUTH_FILE); } catch {}
+}
+
+// HTTP helper (no node-fetch needed — use built-in http/https)
+function httpRequest(url, options = {}, body = null) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const mod = parsed.protocol === 'https:' ? require('https') : require('http');
+    const reqOpts = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      timeout: options.timeout || 8000
+    };
+    const req = mod.request(reqOpts, (res) => {
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+        catch { resolve({ status: res.statusCode, body: data }); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+async function verifyToken(token) {
+  try {
+    const res = await httpRequest(`${DROPBEAM_SERVER}/auth/me`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    });
+    if (res.status === 200) return res.body;
+    return null;
+  } catch { return null; }
+}
+
+async function registerDevice(token) {
+  try {
+    const res = await httpRequest(`${DROPBEAM_SERVER}/devices/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    }, {});
+    if (res.status === 200 || res.status === 201) return res.body;
+    return null;
+  } catch { return null; }
+}
+
+function emitConnectStatus(status) {
+  // status: 'connecting' | 'connected' | 'not-connected' | 'not-installed'
+  if (mainWindow) mainWindow.webContents.send('tailscale:connectStatus', status);
+}
+
+async function startDropbeamConnect(token) {
+  emitConnectStatus('connecting');
+  const deviceInfo = await registerDevice(token);
+  if (!deviceInfo || !deviceInfo.preAuthKey) {
+    console.warn('[connect] Device registration failed or no preAuthKey');
+    emitConnectStatus('not-connected');
+    return;
+  }
+  const { preAuthKey, headscaleUrl } = deviceInfo;
+  const hostname = `dropbeam-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+  const cmd = `tailscale up --login-server "${headscaleUrl}" --auth-key "${preAuthKey}" --hostname "${hostname}"`;
+
+  cpExec(cmd, { timeout: 30000 }, (err) => {
+    if (err) {
+      if (err.code === 127 || (err.message && (err.message.includes('not found') || err.message.includes('ENOENT')))) {
+        console.warn('[connect] Tailscale not installed');
+        emitConnectStatus('not-installed');
+        if (Notification.isSupported()) {
+          const n = new Notification({
+            title: 'DropBeam Connect',
+            body: 'Tailscale not found. Install it at tailscale.com/download to enable mesh networking.'
+          });
+          n.on('click', () => shell.openExternal('https://tailscale.com/download'));
+          n.show();
+        }
+      } else {
+        console.warn('[connect] tailscale up error:', err.message);
+        emitConnectStatus('not-connected');
+      }
+      return;
+    }
+    connectStarted = true;
+    console.log('[connect] Tailscale up — DropBeam Connect active');
+    emitConnectStatus('connected');
+  });
+}
+
+// ─── IPC: Auth handlers ────────────────────────────────────────────────────────
+ipcMain.handle('auth:saveToken', async (event, { token, user }) => {
+  writeAuthFile({ token, user });
+  // Kick off device registration + tailscale in background
+  startDropbeamConnect(token).catch(console.error);
+  return { ok: true };
+});
+
+ipcMain.handle('auth:clearToken', () => { deleteAuthFile(); return { ok: true }; });
+
+ipcMain.handle('auth:getUser', () => {
+  const auth = readAuthFile();
+  return auth ? auth.user : null;
+});
+
+ipcMain.handle('auth:loadApp', () => {
+  if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  return { ok: true };
+});
+
+ipcMain.on('auth:getServerUrl', (event) => {
+  event.returnValue = DROPBEAM_SERVER;
+});
+
+ipcMain.handle('auth:logout', async () => {
+  deleteAuthFile();
+  if (connectStarted) {
+    cpExec('tailscale down', { timeout: 5000 }, () => {});
+    connectStarted = false;
+  }
+  if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'login.html'));
+  return { ok: true };
 });
