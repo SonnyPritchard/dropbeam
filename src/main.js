@@ -587,7 +587,7 @@ app.on('window-all-closed', () => {
 
 
 // ─── DropBeam Connect — Auth & WireGuard ──────────────────────────────────────
-const DROPBEAM_SERVER = process.env.DROPBEAM_SERVER || 'http://localhost:3001';
+const DROPBEAM_SERVER = process.env.DROPBEAM_SERVER || (app.isPackaged ? 'https://dropbeam.onrender.com' : 'http://localhost:3001');
 const AUTH_FILE = path.join(os.homedir(), '.dropbeam', 'auth.json');
 
 let connectStarted = false; // track if we started tailscale
