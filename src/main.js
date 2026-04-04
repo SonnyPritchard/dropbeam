@@ -555,6 +555,8 @@ ipcMain.on('restart-and-install', () => {
   try { autoUpdater.quitAndInstall(); } catch (e) { console.warn('[updater] quitAndInstall failed:', e.message); }
 });
 
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
 app.whenReady().then(() => {
   startSignalingServer();
   createWindow();

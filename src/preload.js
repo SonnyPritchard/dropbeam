@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('dropbeam', {
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', () => cb()),
   onUpdateReady: (cb) => ipcRenderer.on('update-ready', () => cb()),
   restartAndInstall: () => ipcRenderer.send('restart-and-install'),
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
 
   // Tailscale
   tailscale: {

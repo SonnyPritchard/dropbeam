@@ -800,6 +800,16 @@ function showPendingModal() {
   });
 })();
 
+// ─── App Version Badge (Electron) ────────────────────────────────────────────
+(async function showAppVersion() {
+  try {
+    if (!window.dropbeam || !window.dropbeam.getAppVersion) return;
+    const v = await window.dropbeam.getAppVersion();
+    const el = document.getElementById('app-version');
+    if (el && v) el.textContent = `v${v}`;
+  } catch (_) {}
+})();
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 init().catch(console.error);
 
