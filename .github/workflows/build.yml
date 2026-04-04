@@ -87,6 +87,8 @@ jobs:
         uses: android-actions/setup-android@v3
       - name: Install dependencies
         run: npm install
+      - name: Sync web UI into mobile webDir
+        run: npm run sync:web
       - name: Add Capacitor Android platform
         run: npx cap add android
       - name: Sync Capacitor

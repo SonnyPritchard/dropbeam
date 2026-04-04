@@ -8,6 +8,7 @@
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:all": "electron-builder --win --mac",
+    "sync:web": "cp src/index.html web/index.html && cp src/app.js web/app.js",
     "web": "node server.js"
   },
   "dependencies": {
