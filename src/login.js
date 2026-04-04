@@ -2,6 +2,13 @@
 
 const SERVER = window.dropbeam?.auth?.getServerUrl?.() || 'http://localhost:3001';
 
+async function safeJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { return { error: text }; }
+}
+
 function switchTab(tab) {
   document.getElementById('tab-signin').classList.toggle('active', tab === 'signin');
   document.getElementById('tab-signup').classList.toggle('active', tab === 'signup');
@@ -48,7 +55,7 @@ async function doSignIn() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(data.message || data.error || 'Login failed');
     await window.dropbeam.auth.saveToken(data.token, data.user);
     await window.dropbeam.auth.loadApp();
@@ -73,7 +80,7 @@ async function doSignUp() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, password })
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(data.message || data.error || 'Signup failed');
     await window.dropbeam.auth.saveToken(data.token, data.user);
     await window.dropbeam.auth.loadApp();

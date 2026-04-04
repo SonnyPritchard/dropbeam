@@ -2,7 +2,7 @@
 // Works in both Electron (via window.dropbeam preload IPC) and plain browser
 // (via WebSocket + fetch to the local DropBeam web server)
 
-const APP_VERSION = 'v1.1.2';
+const APP_VERSION = 'v1.1.5';
 
 const db = window.dropbeam || createWebAdapter();
 
@@ -802,12 +802,15 @@ function showPendingModal() {
 
 // ─── App Version Badge (Electron) ────────────────────────────────────────────
 (async function showAppVersion() {
+  const el = document.getElementById('app-version');
+  if (!el) return;
   try {
-    if (!window.dropbeam || !window.dropbeam.getAppVersion) return;
-    const v = await window.dropbeam.getAppVersion();
-    const el = document.getElementById('app-version');
-    if (el && v) el.textContent = `v${v}`;
+    if (window.dropbeam && window.dropbeam.getAppVersion) {
+      const v = await window.dropbeam.getAppVersion();
+      if (v) { el.textContent = `v${v}`; return; }
+    }
   } catch (_) {}
+  el.textContent = APP_VERSION;
 })();
 
 // ─── Start ────────────────────────────────────────────────────────────────────
