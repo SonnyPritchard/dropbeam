@@ -824,7 +824,7 @@ init().catch(console.error);
       statusText.textContent = 'Connecting…';
     } else if (status === 'not-installed') {
       dot.classList.add('not-installed');
-      statusText.textContent = 'Install Tailscale';
+      statusText.textContent = 'Setup required';
     } else {
       statusText.textContent = 'Not connected';
     }
