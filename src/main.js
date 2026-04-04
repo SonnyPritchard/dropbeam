@@ -498,23 +498,8 @@ function createWindow() {
     icon: path.join(__dirname, '../assets/icon.png')
   });
 
-  // Auth check: verify stored JWT, load login or main app
-  const auth = readAuthFile();
-  if (auth && auth.token) {
-    verifyToken(auth.token).then(user => {
-      if (user) {
-        mainWindow.loadFile(path.join(__dirname, 'index.html'));
-        startDropbeamConnect(auth.token).catch(console.error);
-      } else {
-        deleteAuthFile();
-        mainWindow.loadFile(path.join(__dirname, 'login.html'));
-      }
-    }).catch(() => {
-      mainWindow.loadFile(path.join(__dirname, 'index.html'));
-    });
-  } else {
-    mainWindow.loadFile(path.join(__dirname, 'login.html'));
-  }
+  // Local-only mode: skip cloud auth, open directly into main app
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -565,7 +550,8 @@ app.whenReady().then(() => {
   setupAutoUpdater(mainWindow);
 
   // Start mDNS + subnet scan after a short delay (so port is bound)
-  setTimeout(() => { startMdns(); startSubnetScan(); connectToPublicSignal(); }, 500);
+  // connectToPublicSignal() disabled — local/WireGuard-only mode
+  setTimeout(() => { startMdns(); startSubnetScan(); }, 500);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -736,6 +722,6 @@ ipcMain.handle('auth:logout', async () => {
     cpExec('tailscale down', { timeout: 5000 }, () => {});
     connectStarted = false;
   }
-  if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'login.html'));
+  if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'index.html'));
   return { ok: true };
 });
