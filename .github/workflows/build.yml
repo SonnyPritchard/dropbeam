@@ -10,9 +10,9 @@ permissions:
   contents: write
 
 # Pinned Tailscale version bundled into the installers.
-# Update this when you want to ship a newer Tailscale runtime.
+# Built from source in CI (no brittle CDN filename assumptions).
 env:
-  TAILSCALE_VERSION: "1.80.3"
+  TAILSCALE_VERSION: "1.96.4"
 
 jobs:
   build-mac:
@@ -22,30 +22,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
 
       - name: Install dependencies
         run: npm install
 
-      # ── Download Tailscale binaries ────────────────────────────────────────
+      # ── Build bundled Tailscale binaries from source ───────────────────────
       # macOS builds x64 and arm64 separately so each gets the right binary.
 
-      - name: Download Tailscale (darwin/amd64)
+      - name: Build Tailscale (darwin/amd64)
         run: |
           mkdir -p bin/mac-x64
-          curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_darwin_amd64.tgz" \
-            | tar -xz -C bin/mac-x64 --strip-components=1
-          # Keep only the two CLI binaries
-          find bin/mac-x64 -not \( -name 'tailscale' -o -name 'tailscaled' \) -not -type d -delete
+          GOBIN="$PWD/bin/mac-x64" GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go install tailscale.com/cmd/tailscale@v${TAILSCALE_VERSION}
+          GOBIN="$PWD/bin/mac-x64" GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go install tailscale.com/cmd/tailscaled@v${TAILSCALE_VERSION}
           chmod +x bin/mac-x64/tailscale bin/mac-x64/tailscaled
           echo "amd64 binaries:"
           ls -lh bin/mac-x64/
 
-      - name: Download Tailscale (darwin/arm64)
+      - name: Build Tailscale (darwin/arm64)
         run: |
           mkdir -p bin/mac-arm64
-          curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_darwin_arm64.tgz" \
-            | tar -xz -C bin/mac-arm64 --strip-components=1
-          find bin/mac-arm64 -not \( -name 'tailscale' -o -name 'tailscaled' \) -not -type d -delete
+          GOBIN="$PWD/bin/mac-arm64" GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go install tailscale.com/cmd/tailscale@v${TAILSCALE_VERSION}
+          GOBIN="$PWD/bin/mac-arm64" GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go install tailscale.com/cmd/tailscaled@v${TAILSCALE_VERSION}
           chmod +x bin/mac-arm64/tailscale bin/mac-arm64/tailscaled
           echo "arm64 binaries:"
           ls -lh bin/mac-arm64/
@@ -105,32 +105,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
 
       - name: Install dependencies
         run: npm install
 
-      # ── Download Tailscale binaries ────────────────────────────────────────
+      # ── Build bundled Tailscale binaries from source ───────────────────────
 
-      - name: Download Tailscale (windows/amd64)
+      - name: Build Tailscale (windows/amd64)
         shell: pwsh
         run: |
-          $ver = $env:TAILSCALE_VERSION
-          $url = "https://pkgs.tailscale.com/stable/tailscale_${ver}_windows_amd64.zip"
-          $zip = "tailscale-win.zip"
-          $tmp = "tailscale-win-tmp"
-
-          Write-Host "Downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 120
-
-          Expand-Archive -Path $zip -DestinationPath $tmp -Force
-
           New-Item -ItemType Directory -Force -Path "bin\win" | Out-Null
+          $env:GOBIN = "$pwd\bin\win"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
 
-          # Locate and copy the two executables (they may be in a subdirectory)
-          Get-ChildItem -Path $tmp -Recurse -Filter "tailscale.exe"  | Select-Object -First 1 | Copy-Item -Destination "bin\win\"
-          Get-ChildItem -Path $tmp -Recurse -Filter "tailscaled.exe" | Select-Object -First 1 | Copy-Item -Destination "bin\win\"
-
-          Remove-Item -Recurse -Force $tmp, $zip
+          go install tailscale.com/cmd/tailscale@v$env:TAILSCALE_VERSION
+          go install tailscale.com/cmd/tailscaled@v$env:TAILSCALE_VERSION
 
           Write-Host "Windows binaries:"
           Get-ChildItem "bin\win\"
