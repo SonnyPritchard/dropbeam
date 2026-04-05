@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+# Pinned Tailscale version bundled into the installers.
+# Update this when you want to ship a newer Tailscale runtime.
+env:
+  TAILSCALE_VERSION: "1.80.3"
+
 jobs:
   build-mac:
     runs-on: macos-latest
@@ -21,24 +26,76 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build macOS DMG (artifact only)
+      # ── Download Tailscale binaries ────────────────────────────────────────
+      # macOS builds x64 and arm64 separately so each gets the right binary.
+
+      - name: Download Tailscale (darwin/amd64)
+        run: |
+          mkdir -p bin/mac-x64
+          curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_darwin_amd64.tgz" \
+            | tar -xz -C bin/mac-x64 --strip-components=1
+          # Keep only the two CLI binaries
+          find bin/mac-x64 -not \( -name 'tailscale' -o -name 'tailscaled' \) -not -type d -delete
+          chmod +x bin/mac-x64/tailscale bin/mac-x64/tailscaled
+          echo "amd64 binaries:"
+          ls -lh bin/mac-x64/
+
+      - name: Download Tailscale (darwin/arm64)
+        run: |
+          mkdir -p bin/mac-arm64
+          curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_darwin_arm64.tgz" \
+            | tar -xz -C bin/mac-arm64 --strip-components=1
+          find bin/mac-arm64 -not \( -name 'tailscale' -o -name 'tailscaled' \) -not -type d -delete
+          chmod +x bin/mac-arm64/tailscale bin/mac-arm64/tailscaled
+          echo "arm64 binaries:"
+          ls -lh bin/mac-arm64/
+
+      # ── Build x64 ──────────────────────────────────────────────────────────
+
+      - name: Stage Tailscale binaries for x64 build
+        run: |
+          mkdir -p bin/mac
+          cp bin/mac-x64/tailscale bin/mac-x64/tailscaled bin/mac/
+
+      - name: Build macOS x64 DMG (artifact only)
         if: "!startsWith(github.ref, 'refs/tags/v')"
-        run: npx electron-builder --mac dmg --publish never
+        run: npx electron-builder --mac dmg --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Build macOS DMG (publish release)
+      - name: Build macOS x64 DMG (publish release)
         if: startsWith(github.ref, 'refs/tags/v')
-        run: npx electron-builder --mac dmg --publish onTag
+        run: npx electron-builder --mac dmg --x64 --publish onTag
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload DMG
+      # ── Build arm64 ────────────────────────────────────────────────────────
+
+      - name: Stage Tailscale binaries for arm64 build
+        run: |
+          cp bin/mac-arm64/tailscale bin/mac-arm64/tailscaled bin/mac/
+
+      - name: Build macOS arm64 DMG (artifact only)
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: npx electron-builder --mac dmg --arm64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build macOS arm64 DMG (publish release)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npx electron-builder --mac dmg --arm64 --publish onTag
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload DMG artifacts
         uses: actions/upload-artifact@v4
         with:
           name: DropBeam-mac
-          path: dist/*.dmg
+          path: |
+            dist/*.dmg
+            dist/*.zip
           retention-days: 30
 
   build-win:
@@ -51,6 +108,34 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      # ── Download Tailscale binaries ────────────────────────────────────────
+
+      - name: Download Tailscale (windows/amd64)
+        shell: pwsh
+        run: |
+          $ver = $env:TAILSCALE_VERSION
+          $url = "https://pkgs.tailscale.com/stable/tailscale_${ver}_windows_amd64.zip"
+          $zip = "tailscale-win.zip"
+          $tmp = "tailscale-win-tmp"
+
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 120
+
+          Expand-Archive -Path $zip -DestinationPath $tmp -Force
+
+          New-Item -ItemType Directory -Force -Path "bin\win" | Out-Null
+
+          # Locate and copy the two executables (they may be in a subdirectory)
+          Get-ChildItem -Path $tmp -Recurse -Filter "tailscale.exe"  | Select-Object -First 1 | Copy-Item -Destination "bin\win\"
+          Get-ChildItem -Path $tmp -Recurse -Filter "tailscaled.exe" | Select-Object -First 1 | Copy-Item -Destination "bin\win\"
+
+          Remove-Item -Recurse -Force $tmp, $zip
+
+          Write-Host "Windows binaries:"
+          Get-ChildItem "bin\win\"
+
+      # ── Build ──────────────────────────────────────────────────────────────
 
       - name: Build Windows installer (artifact only)
         if: "!startsWith(github.ref, 'refs/tags/v')"
@@ -65,7 +150,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload EXE
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: DropBeam-win

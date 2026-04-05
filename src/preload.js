@@ -19,13 +19,14 @@ contextBridge.exposeInMainWorld('dropbeam', {
   restartAndInstall: () => ipcRenderer.send('restart-and-install'),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
 
-  // Tailscale
+  // Tailscale (backed by embedded runtime — no user install required)
   tailscale: {
     getPeers: () => ipcRenderer.invoke('tailscale:getPeers'),
     sendFile: (args) => ipcRenderer.invoke('tailscale:sendFile', args),
     onProgress: (cb) => ipcRenderer.on('tailscale:progress', (e, pct) => cb(pct)),
     offProgress: () => ipcRenderer.removeAllListeners('tailscale:progress'),
-    onConnectStatus: (cb) => ipcRenderer.on('tailscale:connectStatus', (e, status) => cb(status))
+    onConnectStatus: (cb) => ipcRenderer.on('tailscale:connectStatus', (e, status) => cb(status)),
+    onRuntimeError: (cb) => ipcRenderer.on('tailscale:runtimeError', (e, msg) => cb(msg))
   },
 
   // Internet (Render)

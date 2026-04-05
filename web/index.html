@@ -2,74 +2,190 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>DropBeam</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
+/* ── Reset & tokens ─────────────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#08080f;--surface:rgba(255,255,255,.04);--surface2:rgba(255,255,255,.07);
-  --border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.12);
-  --text:#e8ffe8;--text-muted:rgba(200,255,200,.45);--text-dim:rgba(200,255,200,.2);
-  --accent:#00ff88;--accent-dim:rgba(0,255,136,.14);--accent-glow:rgba(0,255,136,.4);
-  --accent2:#00d4ff;--warn:#ff6b35;--danger:#ff4455;--success:#00ff88;
+  --bg:#08080f; --surface:rgba(255,255,255,.04); --surface2:rgba(255,255,255,.07);
+  --surface3:rgba(255,255,255,.10);
+  --border:rgba(255,255,255,.06); --border2:rgba(255,255,255,.12); --border3:rgba(255,255,255,.18);
+  --text:#e8ffe8; --text-muted:rgba(200,255,200,.45); --text-dim:rgba(200,255,200,.22);
+  --accent:#00ff88; --accent-dim:rgba(0,255,136,.14); --accent-glow:rgba(0,255,136,.4);
+  --accent-mid:rgba(0,255,136,.25);
+  --accent2:#00d4ff; --accent2-dim:rgba(0,212,255,.14);
+  --warn:#ff6b35; --danger:#ff4455; --success:#00ff88;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
-body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',-apple-system,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased;user-select:none}
-.hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;flex-shrink:0;z-index:50;-webkit-app-region:drag}
-.logo{font-size:15px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent);-webkit-app-region:no-drag}
-.logo-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);margin-left:5px;animation:pdot 1.5s infinite}
-@keyframes pdot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
-.hdr-center{display:flex;align-items:center;gap:6px;-webkit-app-region:no-drag}
-.mde-label{font-size:10px;color:var(--text-dim);letter-spacing:.8px;text-transform:uppercase}
-.mde-input{font-size:12px;font-weight:600;background:none;border:none;border-bottom:1px solid transparent;color:var(--text-muted);outline:none;cursor:text;transition:border-color .2s,color .2s;font-family:inherit;letter-spacing:.3px;width:130px}
+html,body{
+  background:var(--bg);color:var(--text);
+  font-family:'Space Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
+}
+
+/* ── Shared header ──────────────────────────────────────────────────────────── */
+.hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;
+  flex-shrink:0;z-index:50;
+  border-bottom:1px solid var(--border);
+  background:rgba(8,8,15,.92);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  position:sticky;top:0;
+  -webkit-app-region:drag;
+}
+.logo{
+  font-size:14px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+  color:var(--accent);flex-shrink:0;
+  -webkit-app-region:no-drag;
+}
+.logo-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--accent);box-shadow:0 0 8px var(--accent);margin-left:4px;
+  animation:pdot 1.5s infinite;vertical-align:middle;
+}
+@keyframes pdot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.65)}}
+.hdr-center{
+  display:flex;align-items:center;gap:5px;
+  -webkit-app-region:no-drag;
+  flex:1;justify-content:center;
+}
+.mde-label{font-size:9px;color:var(--text-dim);letter-spacing:.8px;text-transform:uppercase}
+.mde-input{
+  font-size:12px;font-weight:600;background:none;border:none;
+  border-bottom:1px solid transparent;color:var(--text-muted);outline:none;
+  cursor:text;transition:border-color .2s,color .2s;font-family:inherit;
+  letter-spacing:.3px;width:100px;
+}
 .mde-input:focus{border-bottom-color:var(--accent);color:var(--text)}
-.hdr-right{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag}
-.refresh-btn{background:none;border:none;color:var(--text-dim);cursor:pointer;padding:4px;border-radius:4px;display:flex;align-items:center;transition:color .2s}
+.hdr-right{
+  display:flex;align-items:center;gap:6px;
+  -webkit-app-region:no-drag;
+}
+#app-version{font-size:10px;color:var(--text-dim);letter-spacing:.5px}
+.refresh-btn{
+  background:none;border:none;color:var(--text-dim);cursor:pointer;
+  padding:6px;border-radius:6px;display:flex;align-items:center;
+  transition:color .2s;-webkit-app-region:no-drag;
+}
 .refresh-btn:hover{color:var(--accent)}
 @keyframes spin{to{transform:rotate(360deg)}}
-.spinning{animation:spin 1s linear infinite}
-.conn-pill{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--accent);background:var(--accent-dim);border:1px solid rgba(0,255,136,.2);padding:5px 14px;border-radius:20px}
-.canvas-wrap{position:relative;flex:1;min-height:0;overflow:hidden}
+.spinning{animation:spin .8s linear infinite}
+.conn-pill{
+  display:flex;align-items:center;gap:5px;font-size:10px;font-weight:600;
+  letter-spacing:.7px;text-transform:uppercase;color:var(--accent);
+  background:var(--accent-dim);border:1px solid rgba(0,255,136,.2);
+  padding:4px 10px;border-radius:20px;white-space:nowrap;
+}
+.conn-pill.disconnected{color:var(--danger);background:rgba(255,68,85,.1);border-color:rgba(255,68,85,.2)}
+
+/* ── Desktop canvas view ────────────────────────────────────────────────────── */
+.canvas-wrap{
+  position:relative;flex:1;min-height:0;overflow:hidden;
+}
 canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.d-node{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;z-index:30;transition:transform .15s}
+.d-node{
+  position:absolute;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  cursor:pointer;z-index:30;transition:transform .15s;
+}
 .d-node:hover:not(.offline){transform:translate(-50%,-50%) scale(1.1)}
 .d-node.offline{opacity:.3;cursor:default;pointer-events:none}
 .d-node.selected .node-ring{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim),0 0 20px var(--accent-glow)}
 .d-node.drag-over .node-ring{border-color:var(--accent);box-shadow:0 0 0 8px var(--accent-dim),0 0 30px var(--accent-glow)}
-.d-node.sending .node-ring{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(0,212,255,.15),0 0 20px rgba(0,212,255,.4)}
-.node-ring{width:52px;height:52px;border-radius:50%;background:rgba(0,0,0,.6);border:1.5px solid var(--border2);display:flex;align-items:center;justify-content:center;transition:border-color .2s,box-shadow .2s;position:relative;backdrop-filter:blur(8px)}
+.d-node.sending .node-ring{border-color:var(--accent2);box-shadow:0 0 0 3px var(--accent2-dim),0 0 20px rgba(0,212,255,.4)}
+.node-ring{
+  width:52px;height:52px;border-radius:50%;background:rgba(0,0,0,.6);
+  border:1.5px solid var(--border2);display:flex;align-items:center;justify-content:center;
+  transition:border-color .2s,box-shadow .2s;position:relative;backdrop-filter:blur(8px);
+}
 .node-ring svg{width:22px;height:22px}
-.node-label{font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--text-muted);white-space:nowrap;text-align:center;max-width:84px;overflow:hidden;text-overflow:ellipsis}
+.node-label{
+  font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--text-muted);
+  white-space:nowrap;text-align:center;max-width:84px;overflow:hidden;text-overflow:ellipsis;
+}
 .d-node.selected .node-label{color:var(--text)}
-.arc-svg{position:absolute;top:-5px;left:-5px;width:calc(100% + 10px);height:calc(100% + 10px);transform:rotate(-90deg);pointer-events:none}
+.arc-svg{
+  position:absolute;top:-5px;left:-5px;
+  width:calc(100% + 10px);height:calc(100% + 10px);
+  transform:rotate(-90deg);pointer-events:none;
+}
 .arc-track{fill:none;stroke:rgba(0,212,255,.12);stroke-width:2}
 .arc-fill{fill:none;stroke:var(--accent2);stroke-width:2;stroke-linecap:round;transition:stroke-dashoffset .3s}
-.node-pulse{position:absolute;top:50%;left:50%;width:52px;height:52px;border-radius:50%;border:1px solid var(--accent2);transform:translate(-50%,-50%);animation:node-ripple 1.5s ease-out infinite;pointer-events:none}
-@keyframes node-ripple{0%{transform:translate(-50%,-50%) scale(1);opacity:.6}100%{transform:translate(-50%,-50%) scale(2.4);opacity:0}}
-.node-status{position:absolute;bottom:-1px;right:-1px;width:10px;height:10px;border-radius:50%;background:var(--border2);border:1.5px solid var(--bg);transition:background .2s}
+.node-pulse{
+  position:absolute;top:50%;left:50%;width:52px;height:52px;border-radius:50%;
+  border:1px solid var(--accent2);transform:translate(-50%,-50%);
+  animation:node-ripple 1.5s ease-out infinite;pointer-events:none;
+}
+@keyframes node-ripple{
+  0%{transform:translate(-50%,-50%) scale(1);opacity:.6}
+  100%{transform:translate(-50%,-50%) scale(2.4);opacity:0}
+}
+.node-status{
+  position:absolute;bottom:-1px;right:-1px;width:10px;height:10px;
+  border-radius:50%;background:var(--border2);border:1.5px solid var(--bg);transition:background .2s;
+}
 .node-status.sending{background:var(--accent2);box-shadow:0 0 6px var(--accent2)}
 .node-status.done{background:var(--success)}
 .node-status.error{background:var(--danger)}
-.centre-node{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:70px;height:70px;z-index:40}
-.centre-ring{width:70px;height:70px;border-radius:50%;background:rgba(0,0,0,.8);border:2px solid var(--accent);box-shadow:0 0 0 6px var(--accent-dim),0 0 40px var(--accent-glow);display:flex;align-items:center;justify-content:center;transition:box-shadow .3s;backdrop-filter:blur(12px);cursor:pointer}
+.centre-node{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:70px;height:70px;z-index:40;
+}
+.centre-ring{
+  width:70px;height:70px;border-radius:50%;background:rgba(0,0,0,.8);
+  border:2px solid var(--accent);
+  box-shadow:0 0 0 6px var(--accent-dim),0 0 40px var(--accent-glow);
+  display:flex;align-items:center;justify-content:center;
+  transition:box-shadow .3s;backdrop-filter:blur(12px);cursor:pointer;
+}
 .centre-ring.drop-hover{box-shadow:0 0 0 10px var(--accent-dim),0 0 60px var(--accent-glow)}
 .centre-ring svg{width:28px;height:28px}
-.drop-overlay{position:fixed;inset:0;background:rgba(0,255,136,.04);border:2px solid var(--accent);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;backdrop-filter:blur(4px);pointer-events:none}
+.drop-overlay{
+  position:fixed;inset:0;background:rgba(0,255,136,.04);border:2px solid var(--accent);
+  z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;
+  gap:12px;backdrop-filter:blur(4px);pointer-events:none;
+}
 .drop-overlay.show{display:flex}
 .drop-overlay-text{font-size:20px;font-weight:700;color:var(--accent);letter-spacing:1px;text-shadow:0 0 20px var(--accent)}
 .drop-overlay-sub{font-size:13px;color:var(--text-muted)}
+
+/* ── Desktop HUD ────────────────────────────────────────────────────────────── */
 .hud{flex-shrink:0;padding:0 20px 16px;z-index:100}
 .hud-inner{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
 .hud-tip{text-align:center;font-size:11px;color:var(--text-dim);letter-spacing:.5px;padding:4px 0}
-.act-bar{background:rgba(8,8,15,.88);border:1px solid var(--border2);border-radius:10px;overflow:hidden;backdrop-filter:blur(12px)}
-.act-toggle{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;cursor:pointer}
-.act-title{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:flex;align-items:center;gap:8px}
-.act-clear-btn{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:10px;padding:0 4px;font-family:inherit;transition:color .2s}
+.act-bar{
+  background:rgba(8,8,15,.88);border:1px solid var(--border2);
+  border-radius:10px;overflow:hidden;backdrop-filter:blur(12px);
+}
+.act-toggle{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 14px;cursor:pointer;
+}
+.act-title{
+  font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+  color:var(--text-dim);display:flex;align-items:center;gap:8px;
+}
+.act-clear-btn{
+  background:none;border:none;color:var(--text-dim);cursor:pointer;
+  font-size:10px;padding:0 4px;font-family:inherit;transition:color .2s;
+}
 .act-clear-btn:hover{color:var(--text-muted)}
 .activity-toggle-icon{font-size:10px;transition:transform .2s;display:inline-block;color:var(--text-dim)}
 #activity-panel.collapsed .activity-toggle-icon{transform:rotate(-90deg)}
 #activity-panel.collapsed #activity-log{display:none}
-#activity-panel:not(.collapsed) #activity-log{display:flex;flex-direction:column;padding:0 14px 10px;gap:4px;max-height:120px;overflow-y:auto}
+#activity-panel:not(.collapsed) #activity-log{
+  display:flex;flex-direction:column;padding:0 14px 10px;gap:4px;max-height:120px;overflow-y:auto;
+}
 .log-entry{display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11px}
 .log-entry .log-time{color:var(--text-dim);flex-shrink:0;opacity:.7}
 .log-entry .log-msg{color:var(--text-muted);flex:1}
@@ -77,13 +193,32 @@ canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;poin
 .log-entry.error .log-msg{color:var(--danger)}
 .log-entry.warn .log-msg{color:var(--warn)}
 .log-entry.info .log-msg{color:var(--text-muted)}
-#pending-banner{position:fixed;top:0;left:0;right:0;background:rgba(0,255,136,.1);border-bottom:1px solid var(--accent);padding:10px 20px;font-size:13px;display:none;align-items:center;gap:10px;z-index:400}
+
+/* ── Pending banner ─────────────────────────────────────────────────────────── */
+#pending-banner{
+  position:fixed;top:0;left:0;right:0;
+  background:rgba(0,255,136,.1);border-bottom:1px solid var(--accent);
+  padding:10px 20px;font-size:13px;display:none;align-items:center;gap:10px;z-index:400;
+}
 #pending-banner.active{display:flex}
 #pending-banner .banner-text{flex:1;font-weight:500;color:var(--text)}
-.banner-view-btn{background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+.banner-view-btn{
+  background:var(--accent);color:#000;border:none;border-radius:6px;
+  padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;
+}
 .banner-close-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0 4px}
-#toast-container{position:fixed;top:70px;right:16px;z-index:1000;display:flex;flex-direction:column;gap:8px}
-.toast{background:rgba(8,8,15,.96);border:1px solid var(--border2);border-radius:10px;padding:12px 16px;min-width:240px;max-width:320px;font-size:13px;box-shadow:0 8px 32px rgba(0,0,0,.6);animation:slideIn .25s ease;display:flex;gap:10px;align-items:flex-start;backdrop-filter:blur(12px)}
+
+/* ── Toast ──────────────────────────────────────────────────────────────────── */
+#toast-container{
+  position:fixed;top:70px;right:16px;z-index:1000;
+  display:flex;flex-direction:column;gap:8px;
+}
+.toast{
+  background:rgba(8,8,15,.96);border:1px solid var(--border2);border-radius:10px;
+  padding:12px 16px;min-width:240px;max-width:320px;font-size:13px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);animation:slideIn .25s ease;
+  display:flex;gap:10px;align-items:flex-start;backdrop-filter:blur(12px);
+}
 @keyframes slideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
 .toast.success{border-color:rgba(0,255,136,.35)}
 .toast.error{border-color:rgba(255,68,85,.35)}
@@ -91,57 +226,301 @@ canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;poin
 .toast-icon{font-size:16px;flex-shrink:0;margin-top:1px}
 .toast-body .toast-title{font-weight:600;margin-bottom:2px;color:var(--text)}
 .toast-body .toast-desc{color:var(--text-muted);font-size:12px}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(4px)}
+
+/* ── Modals (desktop + mobile fallback) ─────────────────────────────────────── */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;
+  align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(4px);
+}
 .modal-overlay.active{display:flex}
-.modal{background:rgba(10,10,18,.98);border:1px solid var(--border2);border-radius:16px;padding:28px 32px;min-width:320px;max-width:420px;width:90%;box-shadow:0 24px 64px rgba(0,0,0,.7);animation:modalIn .2s ease}
+.modal{
+  background:rgba(10,10,18,.98);border:1px solid var(--border2);border-radius:16px;
+  padding:28px 32px;min-width:320px;max-width:420px;width:90%;
+  box-shadow:0 24px 64px rgba(0,0,0,.7);animation:modalIn .2s ease;
+}
 @keyframes modalIn{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
 .modal-title{font-size:17px;font-weight:700;margin-bottom:8px;color:var(--text)}
 .modal-desc{font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:20px}
-.modal-file-info{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:20px;font-size:13px}
+.modal-file-info{
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:10px 14px;margin-bottom:20px;font-size:13px;
+}
 .modal-file-name{font-weight:600;margin-bottom:2px;color:var(--text)}
 .modal-file-size{font-size:11px;color:var(--text-muted)}
 .modal-actions{display:flex;gap:10px}
-.btn{flex:1;padding:12px 0;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .15s;min-height:48px;font-family:inherit}
+.btn{
+  flex:1;padding:12px 0;border:none;border-radius:8px;font-size:14px;
+  font-weight:600;cursor:pointer;transition:all .15s;min-height:48px;font-family:inherit;
+}
 .btn-accept{background:var(--accent);color:#000}
 .btn-accept:hover{background:#00e077}
 .btn-decline{background:var(--surface2);color:var(--text-muted);border:1px solid var(--border2)}
 .btn-decline:hover{color:var(--danger);border-color:var(--danger)}
-.modal-pending-item{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px}
+.modal-pending-item{
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:10px 14px;margin-bottom:10px;font-size:13px;
+}
 .modal-pending-item .item-sender{font-weight:600;margin-bottom:4px;color:var(--text)}
 .modal-pending-item .item-files{font-size:11px;color:var(--text-muted);margin-bottom:8px}
 .modal-pending-item .item-actions{display:flex;gap:8px}
 .modal-pending-item .item-actions .btn{flex:none;padding:6px 14px;font-size:12px;min-height:0}
-#mobile-device-sheet{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;justify-content:center;z-index:2000;backdrop-filter:blur(4px)}
+
+/* ── Mobile device picker sheet ─────────────────────────────────────────────── */
+#mobile-device-sheet{
+  position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;
+  align-items:flex-end;justify-content:center;z-index:2000;backdrop-filter:blur(4px);
+}
 #mobile-device-sheet.active{display:flex}
-.mobile-sheet{background:rgba(10,10,18,.98);border:1px solid var(--border2);border-radius:20px 20px 0 0;padding:24px 20px 32px;width:100%;max-width:480px;animation:sheetIn .25s ease;max-height:70vh;overflow-y:auto}
+.mobile-sheet{
+  background:rgba(10,10,18,.98);border:1px solid var(--border2);
+  border-radius:20px 20px 0 0;padding:24px 20px;padding-bottom:calc(24px + var(--safe-bottom));
+  width:100%;max-width:520px;animation:sheetIn .25s ease;max-height:72vh;overflow-y:auto;
+}
 @keyframes sheetIn{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
-.mobile-sheet-title{font-size:16px;font-weight:700;margin-bottom:6px;color:var(--text)}
-.mobile-sheet-subtitle{font-size:13px;color:var(--text-muted);margin-bottom:20px}
-.mobile-sheet-device-card{background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;padding:16px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:14px;min-height:64px;transition:all .15s;-webkit-tap-highlight-color:transparent}
-.mobile-sheet-device-card:active{background:rgba(0,255,136,.1);border-color:var(--accent)}
-.mobile-sheet-device-icon{font-size:24px;flex-shrink:0}
-.mobile-sheet-device-name{font-size:15px;font-weight:600;color:var(--text)}
-.mobile-sheet-device-ip{font-size:12px;color:var(--text-muted);margin-top:2px}
-.mobile-sheet-cancel{background:var(--surface2);border:1px solid var(--border2);color:var(--text-muted);border-radius:12px;padding:14px;width:100%;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;min-height:52px;-webkit-tap-highlight-color:transparent;font-family:inherit}
-.mobile-send-area{display:none;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:32px 24px;gap:20px}
-.mobile-send-btn-inner{background:var(--accent);color:#000;border:none;border-radius:16px;padding:20px 32px;font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:10px;min-height:64px;width:100%;max-width:320px;justify-content:center;font-family:inherit;transition:all .15s;-webkit-tap-highlight-color:transparent}
-.mobile-send-btn-inner:active{transform:scale(.97)}
-.mobile-selected-container{display:none;width:100%;max-width:360px;flex-direction:column;align-items:center;gap:12px}
-.mobile-selected-files{width:100%}
-.mobile-selected-files-title{font-size:13px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
-.mobile-file-item{background:var(--surface2);border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px}
-.mobile-file-name{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.mobile-sheet-handle{
+  width:40px;height:4px;border-radius:2px;background:var(--border3);
+  margin:0 auto 20px;
+}
+.mobile-sheet-title{font-size:17px;font-weight:700;margin-bottom:4px;color:var(--text)}
+.mobile-sheet-subtitle{font-size:13px;color:var(--text-muted);margin-bottom:20px;line-height:1.4}
+.mobile-sheet-device-card{
+  background:var(--surface2);border:1.5px solid var(--border2);border-radius:14px;
+  padding:16px;margin-bottom:10px;cursor:pointer;
+  display:flex;align-items:center;gap:14px;min-height:68px;
+  transition:all .15s;
+}
+.mobile-sheet-device-card:active{background:var(--accent-dim);border-color:var(--accent)}
+.mobile-sheet-device-icon{
+  width:42px;height:42px;border-radius:10px;background:var(--surface3);
+  border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+.mobile-sheet-device-icon svg{width:20px;height:20px}
+.mobile-sheet-device-info{flex:1;min-width:0}
+.mobile-sheet-device-name{font-size:15px;font-weight:600;color:var(--text);margin-bottom:3px}
+.mobile-sheet-device-ip{font-size:12px;color:var(--text-muted)}
+.mobile-sheet-device-arrow{color:var(--text-dim);flex-shrink:0;font-size:16px}
+.mobile-sheet-cancel{
+  background:var(--surface2);border:1px solid var(--border2);color:var(--text-muted);
+  border-radius:14px;padding:16px;width:100%;font-size:15px;font-weight:600;cursor:pointer;
+  margin-top:8px;min-height:54px;font-family:inherit;transition:all .15s;
+}
+.mobile-sheet-cancel:active{background:var(--surface3);color:var(--text)}
+
+/* ─── Mobile-only layout ────────────────────────────────────────────────────── */
+.mobile-view{
+  display:none;
+  flex-direction:column;
+  flex:1;min-height:0;
+  overflow-y:auto;
+  padding-bottom:calc(72px + var(--safe-bottom));
+}
+
+/* Discovery / scan header */
+.scan-bar{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 18px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+}
+.scan-ring{
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--accent);border-top-color:transparent;
+  animation:spin .9s linear infinite;flex-shrink:0;
+}
+.scan-ring.idle{animation:none;border-color:var(--text-dim);border-top-color:var(--text-dim)}
+.scan-text{font-size:12px;color:var(--text-muted);letter-spacing:.3px;flex:1}
+.scan-count{
+  font-size:11px;font-weight:700;color:var(--accent);
+  background:var(--accent-dim);border:1px solid rgba(0,255,136,.2);
+  padding:2px 8px;border-radius:10px;letter-spacing:.5px;
+}
+
+/* Device list (shared between mobile and desktop hidden list) */
+#device-list{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+
+.device-card{
+  background:var(--surface);border:1.5px solid var(--border2);border-radius:16px;
+  padding:16px;display:flex;align-items:center;gap:14px;
+  transition:all .2s;cursor:pointer;position:relative;overflow:hidden;
+  min-height:72px;
+}
+.device-card:active{background:var(--accent-dim);border-color:var(--accent);
+  transform:scale(.99);}
+.device-card.drag-over{background:var(--accent-dim);border-color:var(--accent);
+  box-shadow:0 0 20px var(--accent-glow);}
+.device-card.sending-state{border-color:rgba(0,212,255,.4)}
+
+.device-icon{
+  width:44px;height:44px;border-radius:10px;background:var(--surface2);
+  border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;transition:all .2s;
+}
+.device-icon svg{width:20px;height:20px}
+.device-card.sending-state .device-icon{border-color:rgba(0,212,255,.4);
+  background:rgba(0,212,255,.08);}
+
+.device-body{flex:1;min-width:0}
+.device-name{
+  font-size:14px;font-weight:600;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px;
+}
+.device-ip{font-size:11px;color:var(--text-dim);margin-bottom:5px}
+.device-status{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:11px;font-weight:600;letter-spacing:.4px;
+  color:var(--text-dim);
+}
+.device-status::before{
+  content:'';width:5px;height:5px;border-radius:50%;
+  background:var(--text-dim);flex-shrink:0;
+}
+.device-status.idle::before{background:var(--accent);box-shadow:0 0 4px var(--accent)}
+.device-status.idle{color:var(--text-muted)}
+.device-status.sending{color:var(--accent2)}
+.device-status.sending::before{background:var(--accent2);box-shadow:0 0 4px var(--accent2);
+  animation:pdot .8s infinite;}
+.device-status.done{color:var(--success)}
+.device-status.done::before{background:var(--success)}
+.device-status.error{color:var(--danger)}
+.device-status.error::before{background:var(--danger)}
+
+.device-tap-hint{
+  font-size:10px;color:var(--accent);font-weight:600;letter-spacing:.4px;
+  opacity:.7;flex-shrink:0;
+}
+.device-card.sending-state .device-tap-hint{display:none}
+
+/* Progress bar inside card */
+.device-progress{
+  position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:rgba(255,255,255,.04);display:none;overflow:hidden;
+}
+.device-progress.active{display:block}
+.device-progress-fill{height:100%;background:var(--accent2);
+  transition:width .2s ease;width:0%;
+  box-shadow:0 0 6px var(--accent2);}
+
+/* No-devices empty state */
+.no-devices{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:48px 24px;gap:16px;text-align:center;
+}
+.no-devices-orbit{
+  width:80px;height:80px;position:relative;margin-bottom:8px;
+}
+.orbit-ring{
+  position:absolute;inset:0;border-radius:50%;border:1px solid var(--border2);
+  animation:orbit-pulse 2s ease-in-out infinite;
+}
+.orbit-ring:nth-child(2){
+  inset:18px;border-color:var(--accent-dim);animation-delay:.4s;
+}
+.orbit-ring:nth-child(3){
+  inset:30px;background:var(--accent-dim);border:none;
+  display:flex;align-items:center;justify-content:center;
+  animation:pdot 1.5s ease-in-out infinite;
+}
+.orbit-ring:nth-child(3)::after{
+  content:'';width:10px;height:10px;border-radius:50%;
+  background:var(--accent);box-shadow:0 0 12px var(--accent);
+}
+@keyframes orbit-pulse{
+  0%,100%{opacity:.3;transform:scale(1)}
+  50%{opacity:.7;transform:scale(1.05)}
+}
+.no-devices-title{font-size:15px;font-weight:600;color:var(--text-muted)}
+.no-devices-hint{font-size:13px;color:var(--text-dim);line-height:1.5}
+
+/* ── Mobile bottom send bar ─────────────────────────────────────────────────── */
+#mobile-send-area{
+  position:fixed;bottom:0;left:0;right:0;
+  padding:12px 16px;padding-bottom:calc(12px + var(--safe-bottom));
+  background:rgba(8,8,15,.95);border-top:1px solid var(--border2);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  z-index:100;display:none;flex-direction:column;gap:10px;
+}
+
+/* Choose files button (primary state) */
+#mobile-choose-btn{
+  width:100%;background:var(--accent);color:#000;border:none;border-radius:14px;
+  padding:16px;font-size:16px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  min-height:56px;transition:all .15s;font-family:inherit;
+}
+#mobile-choose-btn:active{transform:scale(.98);background:#00e077}
+
+/* Staged files container */
+#mobile-selected-container{
+  display:none;flex-direction:column;gap:10px;
+}
+.staged-files-header{
+  display:flex;align-items:center;justify-content:space-between;
+}
+.staged-files-title{font-size:11px;font-weight:700;letter-spacing:.8px;
+  text-transform:uppercase;color:var(--text-dim);}
+#mobile-clear-files-btn{
+  background:none;border:none;color:var(--text-dim);cursor:pointer;
+  font-size:12px;font-weight:600;font-family:inherit;
+  display:flex;align-items:center;gap:4px;padding:0;
+  transition:color .15s;
+}
+#mobile-clear-files-btn:active{color:var(--danger)}
+.staged-file-scroll{
+  display:flex;flex-direction:column;gap:6px;
+  max-height:120px;overflow-y:auto;
+}
+.mobile-file-item{
+  background:var(--surface2);border-radius:10px;padding:10px 14px;
+  font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px;
+  border:1px solid var(--border);
+}
+.mobile-file-name{
+  font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--text);
+}
 .mobile-file-size{font-size:11px;color:var(--text-muted);flex-shrink:0}
-.mobile-send-now-btn{background:var(--accent);color:#000;border:none;border-radius:12px;padding:14px 24px;font-size:16px;font-weight:700;cursor:pointer;width:100%;max-width:320px;min-height:52px;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;-webkit-tap-highlight-color:transparent;font-family:inherit}
-.mobile-send-now-btn:active{transform:scale(.97)}
-.mobile-clear-btn{background:none;border:1px solid var(--border2);color:var(--text-muted);border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;min-height:44px;-webkit-tap-highlight-color:transparent;font-family:inherit}
-#device-list,#drop-zone{display:none !important}
-.user-badge{display:none !important}
-@media(max-width:768px){body{overflow:auto;height:auto;min-height:100vh}.canvas-wrap{display:none !important}.hud{display:none}.mobile-send-area{display:flex !important}#toast-container{left:16px;right:16px;top:auto;bottom:24px}.toast{max-width:100%;min-width:0}.hdr{padding:12px 16px}}
-@media(min-width:769px){.mobile-send-area{display:none !important}}
+#mobile-send-now-btn{
+  width:100%;background:var(--accent);color:#000;border:none;border-radius:14px;
+  padding:16px;font-size:16px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  min-height:56px;transition:all .15s;font-family:inherit;
+}
+#mobile-send-now-btn:active{transform:scale(.98);background:#00e077}
+
+/* ── Responsive breakpoints ─────────────────────────────────────────────────── */
+@media (max-width:768px){
+  body{display:flex;flex-direction:column;min-height:100vh;overflow:hidden}
+  .hdr{padding:12px 16px}
+  .canvas-wrap{display:none !important}
+  .hud{display:none !important}
+  .mobile-view{display:flex}
+  #mobile-send-area{display:flex}
+  #toast-container{
+    left:16px;right:16px;top:auto;bottom:calc(76px + var(--safe-bottom));
+    align-items:stretch;
+  }
+  .toast{max-width:100%;min-width:0}
+  /* On mobile, incoming transfer modal becomes bottom sheet */
+  .modal-overlay{align-items:flex-end !important}
+  .modal{
+    border-radius:20px 20px 0 0 !important;max-width:100% !important;
+    width:100% !important;padding-bottom:calc(28px + var(--safe-bottom)) !important;
+    animation:sheetIn .25s ease !important;
+  }
+}
+@media (min-width:769px){
+  body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  .mobile-view{display:none !important}
+  #mobile-send-area{display:none !important}
+  /* desktop device-list hidden (radar handles it) */
+  #device-list{display:none !important}
+}
 </style>
 </head>
 <body>
+
+<!-- ── Header ───────────────────────────────────────────────────────────────── -->
 <div class="hdr">
   <div class="logo">DropBeam<span class="logo-dot"></span></div>
   <div class="hdr-center">
@@ -149,16 +528,36 @@ canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;poin
     <input class="mde-input" id="self-name" value="" placeholder="Device name" />
   </div>
   <div class="hdr-right">
-    <span id="app-version" style="font-size:11px;color:var(--text-dim);letter-spacing:.6px;">v—</span>
+    <span id="app-version" style="font-size:10px;color:var(--text-dim);letter-spacing:.5px;">v—</span>
     <button class="refresh-btn" id="refresh-btn" title="Refresh devices">
-      <svg id="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>
-        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>
+      <svg id="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+        <path d="M21 3v5h-5"/>
+        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+        <path d="M8 16H3v5"/>
       </svg>
     </button>
     <div class="conn-pill" id="conn-pill">◉ Connected</div>
   </div>
 </div>
+
+<!-- ── Mobile layout ─────────────────────────────────────────────────────────── -->
+<div class="mobile-view" id="mobile-view">
+
+  <!-- Scan status bar -->
+  <div class="scan-bar" id="scan-bar">
+    <div class="scan-ring" id="scan-ring"></div>
+    <span class="scan-text" id="scan-text">Scanning for devices…</span>
+    <span class="scan-count" id="scan-count" style="display:none">0 found</span>
+  </div>
+
+  <!-- Device cards (populated by app.js renderDevices) -->
+  <div id="device-list"></div>
+
+</div>
+
+<!-- ── Desktop: radar canvas ────────────────────────────────────────────────── -->
 <div class="canvas-wrap" id="canvasWrap">
   <canvas id="radar"></canvas>
   <div class="centre-node" id="centreNode">
@@ -169,17 +568,23 @@ canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;poin
     </div>
   </div>
 </div>
+
+<!-- Desktop drag overlay -->
 <div class="drop-overlay" id="dropOverlay">
   <div class="drop-overlay-text">⬇ DROP TO SEND</div>
   <div class="drop-overlay-sub">Drop on a device to beam the file</div>
 </div>
+
+<!-- ── Desktop HUD ───────────────────────────────────────────────────────────── -->
 <div class="hud">
   <div class="hud-inner">
-    <div class="hud-tip" id="hudTip">Scanning for devices...</div>
+    <div class="hud-tip" id="hudTip">Scanning for devices…</div>
     <div class="act-bar" id="activity-panel">
       <div class="act-toggle" id="activity-header">
         <div class="act-title">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          </svg>
           Beam Log
           <button class="act-clear-btn" id="clear-log" onclick="event.stopPropagation()">Clear</button>
         </div>
@@ -189,36 +594,63 @@ canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;poin
     </div>
   </div>
 </div>
-<div class="mobile-send-area" id="mobile-send-area">
-  <button class="mobile-send-btn-inner" id="mobile-choose-btn">&#128206; Choose Files to Send</button>
-  <div class="mobile-selected-container" id="mobile-selected-container">
-    <div class="mobile-selected-files">
-      <div class="mobile-selected-files-title">Selected Files</div>
-      <div id="mobile-file-list"></div>
-    </div>
-    <button class="mobile-send-now-btn" id="mobile-send-now-btn">&#128640; Send Files</button>
-    <button class="mobile-clear-btn" id="mobile-clear-files-btn">&#10005; Clear selection</button>
-  </div>
-</div>
+
+<!-- ── Pending banner ────────────────────────────────────────────────────────── -->
 <div id="pending-banner">
   <span>&#128229;</span>
   <span class="banner-text" id="pending-banner-text">You have pending transfers</span>
   <button class="banner-view-btn" id="pending-banner-view">View</button>
   <button class="banner-close-btn" id="pending-banner-close">&#10005;</button>
 </div>
-<div id="device-list"></div>
-<div id="drop-zone"></div>
+
+<!-- ── Mobile bottom send bar ────────────────────────────────────────────────── -->
+<div id="mobile-send-area">
+  <button id="mobile-choose-btn">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+    </svg>
+    Choose Files to Send
+  </button>
+  <div id="mobile-selected-container">
+    <div class="staged-files-header">
+      <span class="staged-files-title">Selected Files</span>
+      <button id="mobile-clear-files-btn">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        Clear
+      </button>
+    </div>
+    <div class="staged-file-scroll">
+      <div id="mobile-file-list"></div>
+    </div>
+    <button id="mobile-send-now-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+      Send Files
+    </button>
+  </div>
+</div>
+
+<!-- ── Hidden required inputs ─────────────────────────────────────────────────── -->
 <input type="file" id="mobile-file-input" multiple style="display:none">
+<div id="drop-zone" style="display:none"></div>
 <button id="save-contact-btn" style="display:none"></button>
 <div id="contact-list" style="display:none"></div>
-<div class="user-badge" id="user-badge">
+<div class="user-badge" id="user-badge" style="display:none">
   <div id="user-avatar"></div>
-  <div><div id="user-display-name"></div>
+  <div>
+    <div id="user-display-name"></div>
     <div><span id="connect-dot"></span><span id="connect-status-text"></span></div>
   </div>
   <button id="signout-btn"></button>
 </div>
+
+<!-- ── Toast container ───────────────────────────────────────────────────────── -->
 <div id="toast-container"></div>
+
+<!-- ── Incoming transfer modal ───────────────────────────────────────────────── -->
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal">
     <div class="modal-title">&#128229; Incoming Transfer</div>
@@ -233,6 +665,8 @@ canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;poin
     </div>
   </div>
 </div>
+
+<!-- ── Pending transfers modal ───────────────────────────────────────────────── -->
 <div class="modal-overlay" id="pending-modal-overlay">
   <div class="modal" style="max-width:480px;width:90%">
     <div class="modal-title">&#128229; Pending Transfers</div>
@@ -243,14 +677,167 @@ canvas#radar{display:block;position:absolute;inset:0;width:100%;height:100%;poin
     </div>
   </div>
 </div>
+
+<!-- ── Mobile device picker sheet ────────────────────────────────────────────── -->
 <div id="mobile-device-sheet">
   <div class="mobile-sheet">
+    <div class="mobile-sheet-handle"></div>
     <div class="mobile-sheet-title">Send to which device?</div>
-    <div class="mobile-sheet-subtitle" id="mobile-sheet-subtitle">Tap a device to start the transfer</div>
+    <div class="mobile-sheet-subtitle" id="mobile-sheet-subtitle">
+      Tap a device to start the transfer
+    </div>
     <div id="mobile-sheet-device-list"></div>
     <button class="mobile-sheet-cancel" id="mobile-sheet-cancel">Cancel</button>
   </div>
 </div>
+
+<script>
+// ── Mobile scan bar updates ───────────────────────────────────────────────────
+// Hooks into renderDevices() via MutationObserver to keep the scan bar in sync.
+(function() {
+  const ring = document.getElementById('scan-ring');
+  const text = document.getElementById('scan-text');
+  const count = document.getElementById('scan-count');
+  const list  = document.getElementById('device-list');
+
+  function update() {
+    const cards = list.querySelectorAll('.device-card');
+    const n = cards.length;
+    if (n === 0) {
+      ring.classList.remove('idle');
+      text.textContent = 'Scanning for devices\u2026';
+      count.style.display = 'none';
+    } else {
+      ring.classList.add('idle');
+      text.textContent = n === 1 ? '1 device found' : `${n} devices found`;
+      count.textContent = `${n} found`;
+      count.style.display = 'inline-flex';
+    }
+  }
+
+  const obs = new MutationObserver(update);
+  obs.observe(list, { childList: true, subtree: false });
+  update();
+})();
+
+// ── Enrich device cards with icons (MutationObserver) ─────────────────────────
+// app.js renders cards with class "device-card" but uses emoji/text icons.
+// We upgrade them to match Design 3 style.
+(function() {
+  const list = document.getElementById('device-list');
+
+  const laptopSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></svg>`;
+  const phoneSvg  = `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="17" r="1" fill="rgba(200,255,200,.7)"/></svg>`;
+  const deskSvg   = `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
+
+  function iconFor(name) {
+    const n = (name||'').toLowerCase();
+    if (/phone|android|iphone|mobile/i.test(n)) return phoneSvg;
+    if (/desktop|pc|imac|tower/i.test(n)) return deskSvg;
+    return laptopSvg;
+  }
+
+  function upgradeCard(card) {
+    if (card.dataset.upgraded) return;
+    card.dataset.upgraded = '1';
+
+    // Replace plain text device-name with structured icon+body layout
+    const rawName = card.querySelector('.device-name');
+    const rawIp   = card.querySelector('.device-ip');
+    const rawStat = card.querySelector('.device-status');
+    const rawHint = card.querySelector('.device-tap-hint');
+    const rawProg = card.querySelector('.device-progress');
+    if (!rawName) return;
+
+    const name = rawName.textContent.replace(/^[^\w\s]*/, '').trim();
+    const ip   = rawIp   ? rawIp.textContent   : '';
+    const hint = rawHint ? rawHint.textContent  : '';
+
+    // Rebuild interior
+    const icon = document.createElement('div');
+    icon.className = 'device-icon';
+    icon.innerHTML = iconFor(name);
+
+    const body = document.createElement('div');
+    body.className = 'device-body';
+
+    rawName.className = 'device-name';
+    rawName.textContent = name;
+    body.appendChild(rawName);
+
+    if (rawIp) { rawIp.className = 'device-ip'; body.appendChild(rawIp); }
+    if (rawStat) { rawStat.className = rawStat.className; body.appendChild(rawStat); }
+
+    const tapHint = document.createElement('span');
+    tapHint.className = 'device-tap-hint';
+    tapHint.textContent = '→';
+
+    // Clear and rebuild
+    card.innerHTML = '';
+    card.appendChild(icon);
+    card.appendChild(body);
+    card.appendChild(tapHint);
+    if (rawProg) card.appendChild(rawProg);
+  }
+
+  function scan() {
+    list.querySelectorAll('.device-card').forEach(upgradeCard);
+  }
+
+  const obs = new MutationObserver(scan);
+  obs.observe(list, { childList: true, subtree: true });
+  scan();
+})();
+
+// ── Enrich mobile sheet device cards with icons ───────────────────────────────
+(function() {
+  const sheetList = document.getElementById('mobile-sheet-device-list');
+  const laptopSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></svg>`;
+  const phoneSvg  = `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="17" r="1" fill="rgba(200,255,200,.7)"/></svg>`;
+  const deskSvg   = `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
+
+  function iconFor(name) {
+    if (/phone|android|iphone|mobile/i.test(name||'')) return phoneSvg;
+    if (/desktop|pc|imac|tower/i.test(name||'')) return deskSvg;
+    return laptopSvg;
+  }
+
+  function upgradeSheetCard(card) {
+    if (card.dataset.upgraded) return;
+    card.dataset.upgraded = '1';
+    const iconEl = card.querySelector('.mobile-sheet-device-icon');
+    const nameEl = card.querySelector('.mobile-sheet-device-name');
+    const ipEl   = card.querySelector('.mobile-sheet-device-ip');
+    if (!iconEl || !nameEl) return;
+
+    // Replace emoji icon with SVG icon
+    const name = nameEl.textContent.trim();
+    iconEl.innerHTML = iconFor(name);
+
+    // Wrap body in info div if not already
+    if (!card.querySelector('.mobile-sheet-device-info')) {
+      const info = document.createElement('div');
+      info.className = 'mobile-sheet-device-info';
+      if (nameEl.parentNode !== info) { card.insertBefore(info, nameEl); info.appendChild(nameEl); }
+      if (ipEl && ipEl.parentNode !== info) info.appendChild(ipEl);
+    }
+
+    // Add arrow
+    if (!card.querySelector('.mobile-sheet-device-arrow')) {
+      const arr = document.createElement('span');
+      arr.className = 'mobile-sheet-device-arrow';
+      arr.textContent = '›';
+      card.appendChild(arr);
+    }
+  }
+
+  const obs = new MutationObserver(() => {
+    sheetList.querySelectorAll('.mobile-sheet-device-card').forEach(upgradeSheetCard);
+  });
+  obs.observe(sheetList, { childList: true, subtree: true });
+})();
+</script>
+
 <script src="app.js"></script>
 </body>
 </html>

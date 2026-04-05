@@ -835,12 +835,20 @@ init().catch(console.error);
     } else if (status === 'connecting') {
       dot.classList.add('connecting');
       statusText.textContent = 'Connecting…';
-    } else if (status === 'not-installed') {
+    } else if (status === 'runtime-error') {
       dot.classList.add('not-installed');
-      statusText.textContent = 'Setup required';
+      statusText.textContent = 'Networking unavailable';
     } else {
       statusText.textContent = 'Not connected';
     }
+  }
+
+  // Show a non-intrusive warning if the embedded runtime couldn't start
+  if (window.dropbeam && window.dropbeam.tailscale) {
+    window.dropbeam.tailscale.onRuntimeError && window.dropbeam.tailscale.onRuntimeError((msg) => {
+      console.warn('[connect] Tailscale runtime error:', msg);
+      setConnectStatus('runtime-error');
+    });
   }
 
   // Load user info

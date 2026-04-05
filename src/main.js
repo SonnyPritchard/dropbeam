@@ -8,6 +8,11 @@ const { WebSocketServer, WebSocket } = require('ws');
 const express = require('express');
 const multicastDns = require('multicast-dns');
 
+// ─── Embedded Tailscale runtime ───────────────────────────────────────────────
+// Users do not need to install Tailscale. The runtime manages bundled binaries.
+const tailscaleRuntime = require('./tailscale-runtime');
+let tsRuntimeReady = false;
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 const SERVICE_TYPE = '_dropbeam._tcp.local';
 const SIGNAL_PORT_BASE = 47821;
@@ -331,62 +336,55 @@ function startSubnetScan() {
 }
 
 
-// ─── Tailscale Integration ────────────────────────────────────────────────────
-const { exec: cpExec } = require('child_process');
+// ─── Tailscale Integration (via embedded runtime) ─────────────────────────────
 const https = require('https');
 
 async function getTailscalePeers() {
-  return new Promise((resolve) => {
-    cpExec('tailscale status --json', { timeout: 5000 }, (err, stdout) => {
-      if (err) {
-        // Check if tailscale simply isn't installed vs. other error
-        if (err.code === 127 || err.message?.includes('not found') || err.message?.includes('ENOENT')) {
-          return resolve({ available: false, reason: 'not-installed' });
-        }
-        return resolve({ available: false, reason: err.message });
-      }
-      try {
-        const status = JSON.parse(stdout);
-        const peers = Object.values(status.Peer || {}).map(p => ({
-          name: (p.HostName || p.DNSName || '').replace(/\.$/, ''),
-          ip: (p.TailscaleIPs || [])[0] || null,
-          os: p.OS || 'unknown',
-          online: p.Online === true
-        })).filter(p => p.ip);
-        resolve({ available: true, self: status.Self?.HostName || os.hostname(), peers });
-      } catch (parseErr) {
-        resolve({ available: false, reason: 'parse-error' });
-      }
-    });
-  });
+  if (!tsRuntimeReady) {
+    return { available: false, reason: 'runtime-not-ready' };
+  }
+  try {
+    const stdout = await tailscaleRuntime.exec(['status', '--json'], 5000);
+    const status = JSON.parse(stdout);
+    const peers = Object.values(status.Peer || {}).map(p => ({
+      name: (p.HostName || p.DNSName || '').replace(/\.$/, ''),
+      ip: (p.TailscaleIPs || [])[0] || null,
+      os: p.OS || 'unknown',
+      online: p.Online === true
+    })).filter(p => p.ip);
+    return { available: true, self: status.Self?.HostName || os.hostname(), peers };
+  } catch (err) {
+    return { available: false, reason: err.message };
+  }
 }
 
 ipcMain.handle('tailscale:getPeers', () => getTailscalePeers());
 
 ipcMain.handle('tailscale:sendFile', async (event, { filePath, peerIp }) => {
+  if (!tsRuntimeReady) throw new Error('Tailscale runtime not ready');
   return new Promise((resolve, reject) => {
     if (!filePath || !peerIp) return reject(new Error('filePath and peerIp required'));
 
-    // tailscale file cp <file> <ip>:
-    const child = cpExec(
-      `tailscale file cp "${filePath.replace(/"/g, '\\"')}" "${peerIp}:"`,
-      { timeout: 300000 },
-      (err) => {
-        if (err) reject(new Error(err.message));
-        else resolve({ ok: true });
-      }
-    );
+    // Use the embedded CLI — no shell injection (args passed as array)
+    const child = tailscaleRuntime.spawnCli(['file', 'cp', filePath, `${peerIp}:`], 300000);
 
-    // Tailscale file cp doesn't emit progress — show indeterminate via fake ticks
+    // tailscale file cp doesn't emit progress — show indeterminate via fake ticks
     let pct = 0;
     const tick = setInterval(() => {
       pct = Math.min(pct + 5, 90);
       if (mainWindow) mainWindow.webContents.send('tailscale:progress', pct);
     }, 500);
 
-    child.on('close', () => {
+    child.on('close', (code) => {
       clearInterval(tick);
       if (mainWindow) mainWindow.webContents.send('tailscale:progress', 100);
+      if (code === 0) resolve({ ok: true });
+      else reject(new Error(`tailscale file cp exited with code ${code}`));
+    });
+
+    child.on('error', (err) => {
+      clearInterval(tick);
+      reject(err);
     });
   });
 });
@@ -505,6 +503,16 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Replay last known connect status when the renderer finishes loading
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (lastConnectStatus) {
+      mainWindow.webContents.send('tailscale:connectStatus', lastConnectStatus);
+    }
+    if (!tsRuntimeReady && tsRuntimeError) {
+      mainWindow.webContents.send('tailscale:runtimeError', tsRuntimeError);
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -553,15 +561,35 @@ app.whenReady().then(() => {
   // connectToPublicSignal() disabled — local/WireGuard-only mode
   setTimeout(() => { startMdns(); startSubnetScan(); }, 500);
 
+  // ── Start embedded Tailscale runtime ─────────────────────────────────────
+  tailscaleRuntime.init()
+    .then(() => {
+      tsRuntimeReady = true;
+      console.log('[app] Tailscale runtime ready');
+
+      // Auto-connect if a saved token exists (covers app restarts)
+      const auth = readAuthFile();
+      if (auth && auth.token) {
+        startDropbeamConnect(auth.token).catch(console.error);
+      }
+    })
+    .catch(err => {
+      tsRuntimeError = err.message;
+      console.error('[app] Tailscale runtime failed to start:', err.message);
+      emitConnectStatus('runtime-error');
+      if (mainWindow) {
+        mainWindow.webContents.send('tailscale:runtimeError', err.message);
+      }
+    });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('before-quit', () => {
-  if (connectStarted) {
-    try { require('child_process').execSync('tailscale down', { timeout: 3000 }); } catch {}
-  }
+  // Stop embedded daemon gracefully (deregisters device from Headscale)
+  tailscaleRuntime.stop();
 });
 
 app.on('window-all-closed', () => {
@@ -572,11 +600,13 @@ app.on('window-all-closed', () => {
 });
 
 
-// ─── DropBeam Connect — Auth & WireGuard ──────────────────────────────────────
+// ─── DropBeam Connect — Auth & Mesh Networking ────────────────────────────────
 const DROPBEAM_SERVER = process.env.DROPBEAM_SERVER || (app.isPackaged ? 'https://dropbeam.onrender.com' : 'http://localhost:3001');
 const AUTH_FILE = path.join(os.homedir(), '.dropbeam', 'auth.json');
 
-let connectStarted = false; // track if we started tailscale
+let connectStarted  = false;  // true once tailscale up succeeded
+let lastConnectStatus = null; // replayed to renderer on page load
+let tsRuntimeError  = null;   // set if runtime fails to start
 
 function ensureDropbeamDir() {
   const dir = path.join(os.homedir(), '.dropbeam');
@@ -651,51 +681,49 @@ async function registerDevice(token) {
 }
 
 function emitConnectStatus(status) {
-  // status: 'connecting' | 'connected' | 'not-connected' | 'not-installed'
+  lastConnectStatus = status;
   if (mainWindow) mainWindow.webContents.send('tailscale:connectStatus', status);
 }
 
 async function startDropbeamConnect(token) {
   emitConnectStatus('connecting');
+
+  if (!tsRuntimeReady) {
+    console.warn('[connect] Tailscale runtime not ready — mesh networking unavailable');
+    emitConnectStatus('runtime-error');
+    return;
+  }
+
   const deviceInfo = await registerDevice(token);
   if (!deviceInfo || !deviceInfo.preAuthKey) {
     console.warn('[connect] Device registration failed or no preAuthKey');
     emitConnectStatus('not-connected');
     return;
   }
+
   const { preAuthKey, headscaleUrl } = deviceInfo;
   const hostname = `dropbeam-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
-  const cmd = `tailscale up --login-server "${headscaleUrl}" --auth-key "${preAuthKey}" --hostname "${hostname}"`;
 
-  cpExec(cmd, { timeout: 30000 }, (err) => {
-    if (err) {
-      if (err.code === 127 || (err.message && (err.message.includes('not found') || err.message.includes('ENOENT')))) {
-        console.warn('[connect] Tailscale not installed');
-        emitConnectStatus('not-installed');
-        if (Notification.isSupported()) {
-          const n = new Notification({
-            title: 'DropBeam Connect',
-            body: 'Tailscale not found. Install it at tailscale.com/download to enable mesh networking.'
-          });
-          n.on('click', () => shell.openExternal('https://tailscale.com/download'));
-          n.show();
-        }
-      } else {
-        console.warn('[connect] tailscale up error:', err.message);
-        emitConnectStatus('not-connected');
-      }
-      return;
-    }
+  try {
+    await tailscaleRuntime.exec([
+      'up',
+      '--login-server', headscaleUrl,
+      '--auth-key',     preAuthKey,
+      '--hostname',     hostname,
+    ], 30000);
     connectStarted = true;
-    console.log('[connect] Tailscale up — DropBeam Connect active');
+    console.log('[connect] DropBeam Connect active');
     emitConnectStatus('connected');
-  });
+  } catch (err) {
+    console.warn('[connect] tailscale up error:', err.message);
+    emitConnectStatus('not-connected');
+  }
 }
 
 // ─── IPC: Auth handlers ────────────────────────────────────────────────────────
 ipcMain.handle('auth:saveToken', async (event, { token, user }) => {
   writeAuthFile({ token, user });
-  // Kick off device registration + tailscale in background
+  // Kick off device registration + tailscale up in background
   startDropbeamConnect(token).catch(console.error);
   return { ok: true };
 });
@@ -719,7 +747,7 @@ ipcMain.on('auth:getServerUrl', (event) => {
 ipcMain.handle('auth:logout', async () => {
   deleteAuthFile();
   if (connectStarted) {
-    cpExec('tailscale down', { timeout: 5000 }, () => {});
+    try { await tailscaleRuntime.exec(['down'], 5000); } catch (_) {}
     connectStarted = false;
   }
   if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'index.html'));

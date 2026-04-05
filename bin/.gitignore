@@ -1,0 +1,14 @@
+# Tailscale binaries are downloaded at build time — never commit them.
+# Run "npm run download-tailscale" (or the CI step) to populate this directory.
+
+# Ignore all executables
+*.exe
+tailscale
+tailscaled
+
+# Ignore extracted temp dirs
+_extract/
+_download.*
+
+# But track this .gitignore file itself
+!.gitignore

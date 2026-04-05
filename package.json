@@ -1,6 +1,6 @@
 {
   "name": "dropbeam",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "AirDrop-style P2P file transfer over LAN",
   "main": "src/main.js",
   "scripts": {
@@ -9,7 +9,8 @@
     "build:mac": "electron-builder --mac",
     "build:all": "electron-builder --win --mac",
     "sync:web": "cp src/index.html web/index.html && cp src/app.js web/app.js",
-    "web": "node server.js"
+    "web": "node server.js",
+    "download-tailscale": "node scripts/download-tailscale.js"
   },
   "dependencies": {
     "electron-updater": "^6.8.3",
@@ -43,7 +44,17 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "extraResources": [
+        {
+          "from": "bin/win",
+          "to": "bin",
+          "filter": [
+            "tailscale.exe",
+            "tailscaled.exe"
+          ]
+        }
+      ]
     },
     "mac": {
       "target": [
@@ -53,16 +64,43 @@
             "x64",
             "arm64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "assets/icon.icns",
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "extraResources": [
+        {
+          "from": "bin/mac",
+          "to": "bin",
+          "filter": [
+            "tailscale",
+            "tailscaled"
+          ]
+        }
+      ]
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.png",
+      "extraResources": [
+        {
+          "from": "bin/linux",
+          "to": "bin",
+          "filter": [
+            "tailscale",
+            "tailscaled"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
