@@ -49,7 +49,13 @@ jobs:
           export GOPATH="$PWD/.gopath"
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go install tailscale.com/cmd/tailscale@v${TAILSCALE_VERSION}
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go install tailscale.com/cmd/tailscaled@v${TAILSCALE_VERSION}
-          cp "$GOPATH/bin/darwin_arm64/tailscale" "$GOPATH/bin/darwin_arm64/tailscaled" bin/mac-arm64/
+
+          # On arm64 mac runners, same-arch installs may land in GOPATH/bin,
+          # while explicit cross-arch installs land in GOPATH/bin/<goos>_<goarch>.
+          TS_BIN_DIR="$GOPATH/bin/darwin_arm64"
+          if [ ! -f "$TS_BIN_DIR/tailscale" ]; then TS_BIN_DIR="$GOPATH/bin"; fi
+
+          cp "$TS_BIN_DIR/tailscale" "$TS_BIN_DIR/tailscaled" bin/mac-arm64/
           chmod +x bin/mac-arm64/tailscale bin/mac-arm64/tailscaled
           echo "arm64 binaries:"
           ls -lh bin/mac-arm64/
