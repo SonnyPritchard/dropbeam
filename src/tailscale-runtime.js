@@ -27,6 +27,7 @@ function getApp() {
 class TailscaleRuntime {
   constructor() {
     this.daemon      = null;
+    this._keepAlive  = null;
     this.socketPath  = null;
     this.statePath   = null;
     this.tailscaleBin  = null;
@@ -98,6 +99,7 @@ class TailscaleRuntime {
       : path.join(tsDir, 'tailscaled.sock');
 
     await this._startDaemon();
+    this._startKeepAlive();
     this.ready = true;
     console.log('[ts-runtime] Ready — socket:', this.socketPath);
   }
@@ -137,16 +139,39 @@ class TailscaleRuntime {
       // Poll until the daemon accepts CLI commands (max ~15 s).
       let attempts = 0;
       const poll = () => {
-        this._runCli(['status'], 3000)
-          .then(() => resolve())
-          .catch(() => {
-            if (++attempts < 30) setTimeout(poll, 500);
-            else reject(new Error('tailscaled did not become ready within 15 s'));
-          });
+        execFile(
+          this.tailscaleBin,
+          ['--socket', this.socketPath, 'status'],
+          { timeout: 3000 },
+          (err, stdout, stderr) => {
+            if (!err || (stdout && stdout.length) || (stderr && stderr.length)) {
+              resolve();
+            } else if (++attempts < 30) {
+              setTimeout(poll, 500);
+            } else {
+              reject(new Error('tailscaled did not become ready within 15 s'));
+            }
+          }
+        );
       };
       // Give the process a moment to bind its socket before first poll.
       setTimeout(poll, 800);
     });
+  }
+
+  // On Windows, tailscaled drops the control-plane connection when no IPN
+  // client is connected.  Spawn a long-running `watch-ipn` subprocess so the
+  // Electron process acts as the persistent client for the daemon's lifetime.
+  _startKeepAlive() {
+    if (process.platform !== 'win32') return;
+    if (this._keepAlive) return;
+
+    this._keepAlive = spawn(
+      this.tailscaleBin,
+      ['--socket', this.socketPath, 'debug', 'watch-ipn'],
+      { stdio: 'ignore', detached: false }
+    );
+    this._keepAlive.on('exit', () => { this._keepAlive = null; });
   }
 
   /**
@@ -155,6 +180,10 @@ class TailscaleRuntime {
    * then terminates the tailscaled process.
    */
   stop() {
+    if (this._keepAlive) {
+      this._keepAlive.kill();
+      this._keepAlive = null;
+    }
     if (!this.daemon) return;
     this._runCli(['down'], 3000)
       .catch(() => {})

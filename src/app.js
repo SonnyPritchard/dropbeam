@@ -157,6 +157,7 @@ async function init() {
   setupContacts();
   setupPendingModal();
   setupActivityToggle();
+  let _rr; window.addEventListener('resize', () => { clearTimeout(_rr); _rr = setTimeout(renderRadarNodes, 150); });
 
   document.getElementById('clear-log').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -179,6 +180,8 @@ function setupActivityToggle() {
 // ─── Device rendering ─────────────────────────────────────────────────────────
 function renderDevices() {
   renderContacts();
+  renderPeersPanel();
+  renderRadarNodes();
   const list = document.getElementById('device-list');
   if (devices.length === 0) {
     list.innerHTML = `
@@ -239,6 +242,91 @@ function renderDevices() {
   }
 }
 
+function renderPeersPanel() {
+  const list = document.getElementById('peers-list');
+  const countEl = document.getElementById('peers-count');
+  const tip = document.getElementById('hudTip');
+  if (!list) return;
+  if (countEl) countEl.textContent = devices.length;
+  if (tip) tip.textContent = devices.length > 0 ? `${devices.length} device${devices.length !== 1 ? 's' : ''} found` : 'Scanning for devices…';
+  if (devices.length === 0) {
+    list.innerHTML = '<div class="peers-empty">Scanning for devices…<br>Make sure other devices have DropBeam open</div>';
+    return;
+  }
+  list.innerHTML = '';
+  devices.forEach(device => {
+    const isMesh = device.mesh === true;
+    const card = document.createElement('div');
+    card.className = 'peer-card';
+    card.dataset.deviceId = device.id;
+    card.innerHTML = `
+      <div class="peer-name"><span class="peer-dot"></span>${escHtml(device.name)}</div>
+      <div class="peer-meta"><span class="peer-badge ${isMesh ? 'mesh' : 'lan'}">${isMesh ? 'mesh' : 'lan'}</span>${escHtml(device.host)}</div>
+      <div class="peer-status" id="peer-status-${cssId(device.id)}"></div>
+      <div class="peer-progress" id="peer-progress-${cssId(device.id)}"><div class="peer-progress-fill" id="peer-progress-fill-${cssId(device.id)}" style="width:0%"></div></div>
+    `;
+    card.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation(); card.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) sendFilesToDevice(files, device);
+    });
+    card.addEventListener('click', () => {
+      if (isMobile() && mobileSelectedFiles.length > 0) {
+        sendFilesToDevice([...mobileSelectedFiles], device);
+        clearMobileSelection();
+      }
+    });
+    list.appendChild(card);
+  });
+}
+
+function renderRadarNodes() {
+  const wrap = document.getElementById('canvasWrap');
+  if (!wrap) return;
+  wrap.querySelectorAll('.d-node').forEach(n => n.remove());
+  if (devices.length === 0) return;
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  const panelW = document.getElementById('peers-panel') ? 260 : 0;
+  const cx = (w - panelW) / 2;
+  const cy = h / 2;
+  const r = Math.min(cx, cy) * 0.55;
+  devices.forEach((device, i) => {
+    const angle = (2 * Math.PI * i / devices.length) - Math.PI / 2;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    const isMesh = device.mesh === true;
+    const node = document.createElement('div');
+    node.className = 'd-node';
+    node.dataset.deviceId = device.id;
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    node.innerHTML = `
+      <div class="node-ring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="${isMesh ? '#00d4ff' : '#00ff88'}" stroke-width="1.5" stroke-linecap="round">
+          ${isMesh ? '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>' : '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>'}
+        </svg>
+        <div class="node-status" id="node-status-${cssId(device.id)}"></div>
+      </div>
+      <div class="node-label">${escHtml(device.name)}</div>
+    `;
+    node.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); node.classList.add('drag-over'); });
+    node.addEventListener('dragleave', () => node.classList.remove('drag-over'));
+    node.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation(); node.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) sendFilesToDevice(files, device);
+    });
+    node.addEventListener('click', () => {
+      wrap.querySelectorAll('.d-node').forEach(n => n.classList.remove('selected'));
+      node.classList.add('selected');
+    });
+    wrap.appendChild(node);
+  });
+}
+
 function isMobile() {
   return window.matchMedia('(max-width: 768px)').matches;
 }
@@ -246,6 +334,8 @@ function isMobile() {
 function setDeviceStatus(deviceId, text, type = 'idle') {
   const el = document.getElementById(`status-${cssId(deviceId)}`);
   if (el) { el.textContent = text; el.className = `device-status ${type}`; }
+  const peerEl = document.getElementById(`peer-status-${cssId(deviceId)}`);
+  if (peerEl) { peerEl.textContent = text; peerEl.className = `peer-status ${type}`; }
 }
 
 function setDeviceProgress(deviceId, pct) {
@@ -254,6 +344,12 @@ function setDeviceProgress(deviceId, pct) {
   if (bar && fill) {
     if (pct >= 0 && pct <= 100) { bar.classList.add('active'); fill.style.width = `${pct}%`; }
     else { bar.classList.remove('active'); fill.style.width = '0%'; }
+  }
+  const pBar = document.getElementById(`peer-progress-${cssId(deviceId)}`);
+  const pFill = document.getElementById(`peer-progress-fill-${cssId(deviceId)}`);
+  if (pBar && pFill) {
+    if (pct >= 0 && pct <= 100) { pBar.classList.add('active'); pFill.style.width = `${pct}%`; }
+    else { pBar.classList.remove('active'); pFill.style.width = '0%'; }
   }
 }
 

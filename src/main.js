@@ -360,6 +360,66 @@ async function getTailscalePeers() {
 
 ipcMain.handle('tailscale:getPeers', () => getTailscalePeers());
 
+// ─── Mesh Peer Discovery (adds Tailscale peers to discoveredDevices) ────────
+let meshPollInterval = null;
+
+function startMeshPeerPolling() {
+  if (meshPollInterval) return;
+  console.log('[mesh] Starting peer polling');
+
+  async function poll() {
+    const result = await getTailscalePeers();
+    if (!result.available || !result.peers) return;
+
+    let changed = false;
+    const meshIds = new Set();
+
+    for (const peer of result.peers) {
+      if (!peer.online || !peer.ip) continue;
+      const id = `ts-${peer.name}`;
+      meshIds.add(id);
+
+      const existing = discoveredDevices.get(id);
+      const entry = {
+        id,
+        name: peer.name,
+        host: peer.ip,
+        port: signalingPort,
+        lastSeen: Date.now(),
+        mesh: true,
+        os: peer.os,
+      };
+      discoveredDevices.set(id, entry);
+      if (!existing) {
+        console.log(`[mesh] Found: ${peer.name} @ ${peer.ip}`);
+        changed = true;
+      }
+    }
+
+    // Remove mesh peers that went offline
+    for (const [id, dev] of discoveredDevices) {
+      if (dev.mesh && !meshIds.has(id)) {
+        discoveredDevices.delete(id);
+        changed = true;
+      }
+    }
+
+    if (changed && mainWindow) {
+      mainWindow.webContents.send('devices-updated', getDeviceList());
+    }
+  }
+
+  poll();
+  meshPollInterval = setInterval(poll, 8000);
+}
+
+function stopMeshPeerPolling() {
+  if (meshPollInterval) {
+    clearInterval(meshPollInterval);
+    meshPollInterval = null;
+  }
+}
+
 ipcMain.handle('tailscale:sendFile', async (event, { filePath, peerIp }) => {
   if (!tsRuntimeReady) throw new Error('Tailscale runtime not ready');
   return new Promise((resolve, reject) => {
@@ -496,8 +556,12 @@ function createWindow() {
     icon: path.join(__dirname, '../assets/icon.png')
   });
 
-  // Local-only mode: skip cloud auth, open directly into main app
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  const auth = readAuthFile();
+  if (auth && auth.token) {
+    mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  } else {
+    mainWindow.loadFile(path.join(__dirname, 'login.html'));
+  }
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -588,7 +652,7 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
-  // Stop embedded daemon gracefully (deregisters device from Headscale)
+  stopMeshPeerPolling();
   tailscaleRuntime.stop();
 });
 
@@ -601,7 +665,7 @@ app.on('window-all-closed', () => {
 
 
 // ─── DropBeam Connect — Auth & Mesh Networking ────────────────────────────────
-const DROPBEAM_SERVER = process.env.DROPBEAM_SERVER || (app.isPackaged ? 'https://dropbeam.onrender.com' : 'http://localhost:3001');
+const DROPBEAM_SERVER = process.env.DROPBEAM_SERVER || (app.isPackaged ? 'http://109.155.116.11:3001' : 'http://localhost:3001');
 const AUTH_FILE = path.join(os.homedir(), '.dropbeam', 'auth.json');
 
 let connectStarted  = false;  // true once tailscale up succeeded
@@ -714,6 +778,7 @@ async function startDropbeamConnect(token) {
     connectStarted = true;
     console.log('[connect] DropBeam Connect active');
     emitConnectStatus('connected');
+    startMeshPeerPolling();
   } catch (err) {
     console.warn('[connect] tailscale up error:', err.message);
     emitConnectStatus('not-connected');
@@ -746,10 +811,11 @@ ipcMain.on('auth:getServerUrl', (event) => {
 
 ipcMain.handle('auth:logout', async () => {
   deleteAuthFile();
+  stopMeshPeerPolling();
   if (connectStarted) {
     try { await tailscaleRuntime.exec(['down'], 5000); } catch (_) {}
     connectStarted = false;
   }
-  if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'login.html'));
   return { ok: true };
 });

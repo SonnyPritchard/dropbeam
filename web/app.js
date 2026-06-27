@@ -2,13 +2,10 @@
 // Works in both Electron (via window.dropbeam preload IPC) and plain browser
 // (via WebSocket + fetch to the local DropBeam web server)
 
-const APP_VERSION = 'v1.1.5';
+const APP_VERSION = 'v1.1.12';
 
 const db = window.dropbeam || createWebAdapter();
 
-/**
- * Web adapter — mirrors the window.dropbeam API using WebSocket + fetch.
- */
 function createWebAdapter() {
   const PUBLIC_SIGNAL = 'wss://dropbeam.onrender.com';
   const isLocal = location.hostname === 'localhost' || location.hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./);
@@ -82,7 +79,7 @@ function createWebAdapter() {
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       return { filePath: fileName };
     },
-    readFile: async ({ filePath }) => { throw new Error('readFile not available in browser — use file picker'); },
+    readFile: async ({ filePath }) => { throw new Error('readFile not available in browser'); },
     onDevicesUpdated: (cb) => { devicesCallback = cb; },
     onSignalReceived: (cb) => { signalCallback = cb; },
     onPendingTransfers: (cb) => { pendingFromServerCallback = cb; },
@@ -91,6 +88,18 @@ function createWebAdapter() {
     getApiBase: () => isLocal ? `http://${location.host}` : 'https://dropbeam.onrender.com',
     removeAllListeners: () => {}
   };
+}
+
+// ─── SVG Icons ───────────────────────────────────────────────────────────────
+const ICON_MONITOR = '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>';
+const ICON_GLOBE = '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(0,212,255,.7)" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+const ICON_PHONE = '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(200,255,200,.7)" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="17" r="1" fill="rgba(200,255,200,.7)"/></svg>';
+
+function deviceIcon(device) {
+  if (device.mesh) return ICON_GLOBE;
+  const n = (device.name || '').toLowerCase();
+  if (/phone|android|iphone|mobile/i.test(n)) return ICON_PHONE;
+  return ICON_MONITOR;
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -103,11 +112,9 @@ let incomingTransfers = new Map();
 let pendingIncoming = null;
 let dragTargetDevice = null;
 
-// Mobile state
 let mobileSelectedFiles = [];
-let mobileSendResolve = null; // resolves when user picks a device in the sheet
+let mobileSendResolve = null;
 
-// Offline queuing state
 let serverPendingTransfers = [];
 let queuedTransfers = new Map();
 
@@ -145,7 +152,7 @@ async function init() {
     const queued = queuedTransfers.get(transferId);
     if (!queued) return;
     queuedTransfers.delete(transferId);
-    log('info', `Recipient ${queued.contact.name} is online — starting transfer…`);
+    log('info', `Recipient ${queued.contact.name} is online — starting transfer`);
     const device = devices.find(d => d.id === recipientId) || { id: recipientId, name: queued.contact.name, host: 'signal', port: 0, relay: true };
     sendFilesToDevice(queued.files, device);
     renderContacts();
@@ -157,6 +164,7 @@ async function init() {
   setupContacts();
   setupPendingModal();
   setupActivityToggle();
+  let _rr; window.addEventListener('resize', () => { clearTimeout(_rr); _rr = setTimeout(renderRadarNodes, 150); });
 
   document.getElementById('clear-log').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -166,7 +174,6 @@ async function init() {
   log('info', `DropBeam started as "${selfInfo.name}" (${selfInfo.ip}:${selfInfo.port})`);
 }
 
-// ─── Activity log toggle (collapsible on mobile) ──────────────────────────────
 function setupActivityToggle() {
   const panel = document.getElementById('activity-panel');
   const header = document.getElementById('activity-header');
@@ -179,35 +186,56 @@ function setupActivityToggle() {
 // ─── Device rendering ─────────────────────────────────────────────────────────
 function renderDevices() {
   renderContacts();
+  renderPeersPanel();
+  renderRadarNodes();
+  renderMobileDeviceList();
+  updateScanBar();
+
+  if (document.getElementById('mobile-device-sheet').classList.contains('active')) {
+    populateMobileSheet();
+  }
+}
+
+function renderMobileDeviceList() {
   const list = document.getElementById('device-list');
+  if (!list) return;
   if (devices.length === 0) {
-    list.innerHTML = `
-      <div class="no-devices">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="3" width="20" height="14" rx="2"/>
-          <path d="M8 21h8M12 17v4"/>
-        </svg>
-        <div>No devices found yet…<br/>Make sure others have DropBeam open</div>
-      </div>`;
+    list.innerHTML = '<div class="no-devices"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><div>No devices found yet...<br>Make sure others have DropBeam open</div></div>';
     return;
   }
-
   list.innerHTML = '';
   devices.forEach(device => {
+    const isMesh = device.mesh === true;
     const card = document.createElement('div');
     card.className = 'device-card';
     card.dataset.deviceId = device.id;
-    card.innerHTML = `
-      <div class="device-name">💻 ${escHtml(device.name)}</div>
-      <div class="device-ip">${escHtml(device.host)}:${device.port}</div>
-      <div class="device-status idle" id="status-${cssId(device.id)}">Ready to receive</div>
-      <div class="device-tap-hint">👆 Tap to send files</div>
-      <div class="device-progress" id="progress-${cssId(device.id)}">
-        <div class="device-progress-fill" id="progress-fill-${cssId(device.id)}" style="width:0%"></div>
-      </div>
+
+    const iconDiv = document.createElement('div');
+    iconDiv.className = `device-icon${isMesh ? ' mesh' : ''}`;
+    iconDiv.innerHTML = deviceIcon(device);
+
+    const body = document.createElement('div');
+    body.className = 'device-body';
+    body.innerHTML = `
+      <div class="device-name"><span class="peer-dot"></span>${escHtml(device.name)}</div>
+      <div class="device-meta"><span class="peer-badge ${isMesh ? 'mesh' : 'lan'}">${isMesh ? 'MESH' : 'LAN'}</span>${escHtml(device.host)}</div>
+      <div class="device-status" id="status-${cssId(device.id)}">Ready</div>
     `;
 
-    // Desktop: drag & drop
+    const arrow = document.createElement('span');
+    arrow.className = 'device-tap-hint';
+    arrow.textContent = '›';
+
+    const progress = document.createElement('div');
+    progress.className = 'device-progress';
+    progress.id = `progress-${cssId(device.id)}`;
+    progress.innerHTML = `<div class="device-progress-fill" id="progress-fill-${cssId(device.id)}" style="width:0%"></div>`;
+
+    card.appendChild(iconDiv);
+    card.appendChild(body);
+    card.appendChild(arrow);
+    card.appendChild(progress);
+
     card.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); card.classList.add('drag-over'); dragTargetDevice = device; });
     card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
     card.addEventListener('drop', (e) => {
@@ -215,16 +243,12 @@ function renderDevices() {
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) sendFilesToDevice(files, device);
     });
-
-    // Mobile: tap to send (resolves pending mobile device picker)
     card.addEventListener('click', () => {
       if (isMobile()) {
         if (mobileSelectedFiles.length > 0) {
-          // files already chosen — send to this device
           sendFilesToDevice([...mobileSelectedFiles], device);
           clearMobileSelection();
         } else {
-          // no files — trigger file picker first
           triggerMobileFilePicker(device);
         }
       }
@@ -232,11 +256,109 @@ function renderDevices() {
 
     list.appendChild(card);
   });
+}
 
-  // If mobile sheet is open and resolves are waiting, refresh it too
-  if (document.getElementById('mobile-device-sheet').classList.contains('active')) {
-    populateMobileSheet();
+function updateScanBar() {
+  const ring = document.getElementById('scan-ring');
+  const text = document.getElementById('scan-text');
+  const count = document.getElementById('scan-count');
+  if (!ring || !text || !count) return;
+  const n = devices.length;
+  if (n === 0) {
+    ring.classList.remove('idle');
+    text.textContent = 'Scanning for devices...';
+    count.style.display = 'none';
+  } else {
+    ring.classList.add('idle');
+    text.textContent = n === 1 ? '1 device found' : `${n} devices found`;
+    count.textContent = `${n} found`;
+    count.style.display = 'inline-flex';
   }
+}
+
+function renderPeersPanel() {
+  const list = document.getElementById('peers-list');
+  const countEl = document.getElementById('peers-count');
+  const tip = document.getElementById('hudTip');
+  if (!list) return;
+  if (countEl) countEl.textContent = devices.length;
+  if (tip) tip.textContent = devices.length > 0 ? `${devices.length} device${devices.length !== 1 ? 's' : ''} found` : 'Scanning for devices...';
+  if (devices.length === 0) {
+    list.innerHTML = '<div class="peers-empty">Scanning for devices...<br>Make sure other devices have DropBeam open</div>';
+    return;
+  }
+  list.innerHTML = '';
+  devices.forEach(device => {
+    const isMesh = device.mesh === true;
+    const card = document.createElement('div');
+    card.className = 'peer-card';
+    card.dataset.deviceId = device.id;
+    card.innerHTML = `
+      <div class="peer-name"><span class="peer-dot"></span>${escHtml(device.name)}</div>
+      <div class="peer-meta"><span class="peer-badge ${isMesh ? 'mesh' : 'lan'}">${isMesh ? 'MESH' : 'LAN'}</span>${escHtml(device.host)}</div>
+      <div class="peer-status" id="peer-status-${cssId(device.id)}"></div>
+      <div class="peer-progress" id="peer-progress-${cssId(device.id)}"><div class="peer-progress-fill" id="peer-progress-fill-${cssId(device.id)}" style="width:0%"></div></div>
+    `;
+    card.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation(); card.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) sendFilesToDevice(files, device);
+    });
+    card.addEventListener('click', () => {
+      if (isMobile() && mobileSelectedFiles.length > 0) {
+        sendFilesToDevice([...mobileSelectedFiles], device);
+        clearMobileSelection();
+      }
+    });
+    list.appendChild(card);
+  });
+}
+
+function renderRadarNodes() {
+  const wrap = document.getElementById('canvasWrap');
+  if (!wrap) return;
+  wrap.querySelectorAll('.d-node').forEach(n => n.remove());
+  if (devices.length === 0) return;
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  const panelW = document.getElementById('peers-panel') ? 260 : 0;
+  const cx = (w - panelW) / 2;
+  const cy = h / 2;
+  const r = Math.min(cx, cy) * 0.55;
+  devices.forEach((device, i) => {
+    const angle = (2 * Math.PI * i / devices.length) - Math.PI / 2;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    const isMesh = device.mesh === true;
+    const node = document.createElement('div');
+    node.className = 'd-node';
+    node.dataset.deviceId = device.id;
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    node.innerHTML = `
+      <div class="node-ring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="${isMesh ? '#00d4ff' : '#00ff88'}" stroke-width="1.5" stroke-linecap="round">
+          ${isMesh ? '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>' : '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>'}
+        </svg>
+        <div class="node-status" id="node-status-${cssId(device.id)}"></div>
+      </div>
+      <div class="node-label">${escHtml(device.name)}</div>
+    `;
+    node.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); node.classList.add('drag-over'); });
+    node.addEventListener('dragleave', () => node.classList.remove('drag-over'));
+    node.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation(); node.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) sendFilesToDevice(files, device);
+    });
+    node.addEventListener('click', () => {
+      wrap.querySelectorAll('.d-node').forEach(n => n.classList.remove('selected'));
+      node.classList.add('selected');
+    });
+    wrap.appendChild(node);
+  });
 }
 
 function isMobile() {
@@ -246,6 +368,8 @@ function isMobile() {
 function setDeviceStatus(deviceId, text, type = 'idle') {
   const el = document.getElementById(`status-${cssId(deviceId)}`);
   if (el) { el.textContent = text; el.className = `device-status ${type}`; }
+  const peerEl = document.getElementById(`peer-status-${cssId(deviceId)}`);
+  if (peerEl) { peerEl.textContent = text; peerEl.className = `peer-status ${type}`; }
 }
 
 function setDeviceProgress(deviceId, pct) {
@@ -254,6 +378,12 @@ function setDeviceProgress(deviceId, pct) {
   if (bar && fill) {
     if (pct >= 0 && pct <= 100) { bar.classList.add('active'); fill.style.width = `${pct}%`; }
     else { bar.classList.remove('active'); fill.style.width = '0%'; }
+  }
+  const pBar = document.getElementById(`peer-progress-${cssId(deviceId)}`);
+  const pFill = document.getElementById(`peer-progress-fill-${cssId(deviceId)}`);
+  if (pBar && pFill) {
+    if (pct >= 0 && pct <= 100) { pBar.classList.add('active'); pFill.style.width = `${pct}%`; }
+    else { pBar.classList.remove('active'); pFill.style.width = '0%'; }
   }
 }
 
@@ -272,7 +402,7 @@ function setupMobileSend() {
     if (files.length === 0) return;
     mobileSelectedFiles = files;
     renderMobileFileList(files);
-    fileInput.value = ''; // reset so same file can be re-selected
+    fileInput.value = '';
   });
 
   sendNowBtn.addEventListener('click', () => {
@@ -299,7 +429,6 @@ function setupMobileSend() {
 
 function triggerMobileFilePicker(device) {
   const fileInput = document.getElementById('mobile-file-input');
-  // Temporarily listen once, then send to the specific device
   const onceHandler = () => {
     const files = Array.from(fileInput.files);
     fileInput.removeEventListener('change', onceHandler);
@@ -321,8 +450,7 @@ function renderMobileFileList(files) {
     listEl.appendChild(item);
   });
   document.getElementById('mobile-choose-btn').style.display = 'none';
-  const container = document.getElementById('mobile-selected-container');
-  container.style.display = 'flex';
+  document.getElementById('mobile-selected-container').style.display = 'flex';
 }
 
 function clearMobileSelection() {
@@ -343,14 +471,16 @@ function populateMobileSheet() {
   const listEl = document.getElementById('mobile-sheet-device-list');
   listEl.innerHTML = '';
   devices.forEach(device => {
+    const isMesh = device.mesh === true;
     const card = document.createElement('div');
     card.className = 'mobile-sheet-device-card';
     card.innerHTML = `
-      <div class="mobile-sheet-device-icon">💻</div>
-      <div>
+      <div class="mobile-sheet-device-icon${isMesh ? ' mesh' : ''}">${deviceIcon(device)}</div>
+      <div class="mobile-sheet-device-info">
         <div class="mobile-sheet-device-name">${escHtml(device.name)}</div>
-        <div class="mobile-sheet-device-ip">${escHtml(device.host)}:${device.port}</div>
+        <div class="mobile-sheet-device-meta"><span class="peer-badge ${isMesh ? 'mesh' : 'lan'}">${isMesh ? 'MESH' : 'LAN'}</span>${escHtml(device.host)}</div>
       </div>
+      <span class="mobile-sheet-device-arrow">›</span>
     `;
     card.addEventListener('click', () => {
       document.getElementById('mobile-device-sheet').classList.remove('active');
@@ -387,15 +517,15 @@ function setupRefresh() {
   });
 }
 
-// ─── Sending files ─────────────────────────────────────────────────────────────
+// ─── Sending files ────────────────────────────────────────────────────────────
 async function sendFilesToDevice(files, device) {
   for (const file of files) await sendOneFile(file, device);
 }
 
 async function sendOneFile(file, device) {
   const transferId = generateId();
-  log('info', `Sending "${file.name}" to ${device.name}…`);
-  setDeviceStatus(device.id, `Sending ${file.name}…`, 'sending');
+  log('info', `Sending "${file.name}" to ${device.name}...`);
+  setDeviceStatus(device.id, `Sending ${file.name}...`, 'sending');
   setDeviceProgress(device.id, 0);
 
   try {
@@ -429,11 +559,11 @@ async function sendOneFile(file, device) {
       setDeviceProgress(device.id, Math.round((offset / total) * 100));
     }
 
-    setDeviceStatus(device.id, `✓ Sent ${file.name}`, 'done');
+    setDeviceStatus(device.id, `Sent ${file.name}`, 'done');
     setDeviceProgress(device.id, -1);
     log('success', `"${file.name}" sent to ${device.name}`);
     showToast('Transfer complete', `"${file.name}" sent to ${device.name}`, 'success');
-    setTimeout(() => setDeviceStatus(device.id, 'Ready to receive', 'idle'), 3000);
+    setTimeout(() => setDeviceStatus(device.id, 'Ready', 'idle'), 3000);
 
   } catch (err) {
     console.error(err);
@@ -517,7 +647,7 @@ function setupReceiverChannel(channel, fromId, transferId) {
       if (!state) return;
       state.received += data.byteLength;
       const pct = Math.min(100, Math.round((state.received / state.fileSize) * 100));
-      log('info', `Receiving… ${pct}%`);
+      log('info', `Receiving... ${pct}%`);
       if (state.fileWriter) {
         try { await state.fileWriter.write(data); }
         catch (err) { log('error', `Disk write failed for "${state.fileName}": ${err.message}`); await state.fileWriter.abort().catch(() => {}); state.fileWriter = null; state.chunks = []; }
@@ -530,7 +660,7 @@ function setupReceiverChannel(channel, fromId, transferId) {
           try {
             const blob = new Blob(state.chunks);
             const { filePath } = await db.saveFile({ fileName: state.fileName, blob });
-            log('success', `Received "${state.fileName}" from ${state.fromName} → ${filePath}`);
+            log('success', `Received "${state.fileName}" from ${state.fromName}`);
             showToast('File received!', `"${state.fileName}" saved`, 'success');
           } catch (err) { log('error', `Failed to save "${state.fileName}": ${err.message}`); }
         }
@@ -585,7 +715,7 @@ function formatBytes(bytes) {
   return `${(bytes / 1073741824).toFixed(2)} GB`;
 }
 
-// ─── Toast notifications ──────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
 function showToast(title, desc, type = 'info') {
   const icons = { success: '✅', error: '❌', warn: '⚠️', info: 'ℹ️' };
   const container = document.getElementById('toast-container');
@@ -604,7 +734,6 @@ function log(type, msg) {
   entry.className = `log-entry ${type}`;
   entry.innerHTML = `<span class="log-time">${now}</span><span class="log-msg">${escHtml(msg)}</span>`;
   logEl.prepend(entry);
-  // Expand panel when new log arrives
   const panel = document.getElementById('activity-panel');
   if (panel && !isMobile()) panel.classList.remove('collapsed');
   while (logEl.children.length > 100) logEl.removeChild(logEl.lastChild);
@@ -625,7 +754,7 @@ function showIncomingModal(fromName, fileName, fileSize) {
       hintEl.style.cssText = 'font-size:12px;color:#888;margin-top:6px;';
       document.getElementById('modal-file-size').insertAdjacentElement('afterend', hintEl);
     }
-    hintEl.textContent = hasFSA ? '💾 Will save directly to disk' : '📥 Will download when transfer is complete';
+    hintEl.textContent = hasFSA ? 'Will save directly to disk' : 'Will download when transfer is complete';
 
     const overlay = document.getElementById('modal-overlay');
     overlay.classList.add('active');
@@ -673,33 +802,15 @@ function renderContacts() {
   const list = document.getElementById('contact-list');
   if (!list) return;
   if (contacts.length === 0) { list.innerHTML = '<div class="no-devices" style="padding:16px;font-size:12px;">No saved contacts yet</div>'; return; }
-
   list.innerHTML = '';
   const onlineIds = new Set(devices.map(d => d.id));
-
   contacts.forEach(contact => {
     const isOnline = onlineIds.has(contact.id);
-    const hasQueued = [...queuedTransfers.values()].some(q => q.recipientId === contact.id);
     const card = document.createElement('div');
     card.className = `device-card${isOnline ? '' : ' offline'}`;
     card.dataset.contactId = contact.id;
-    card.innerHTML = `
-      <div class="device-name">${isOnline ? '💻' : '💤'} ${escHtml(contact.name)}${hasQueued ? '<span class="queued-badge">Queued</span>' : ''}</div>
-      <div class="device-ip">${isOnline ? 'Online' : 'Offline'}</div>
-      <div class="contact-actions">
-        <button class="btn-icon remove-contact-btn" data-id="${escHtml(contact.id)}" title="Remove contact">Remove</button>
-      </div>
-    `;
-    card.querySelector('.remove-contact-btn').addEventListener('click', (e) => { e.stopPropagation(); removeContact(contact.id); });
-    if (!isOnline) {
-      card.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); card.classList.add('drag-over'); });
-      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-      card.addEventListener('drop', (e) => {
-        e.preventDefault(); e.stopPropagation(); card.classList.remove('drag-over');
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length > 0) queueFilesForContact(files, contact);
-      });
-    }
+    card.innerHTML = `<div class="device-name">${escHtml(contact.name)}</div><div class="device-meta">${isOnline ? 'Online' : 'Offline'}</div>`;
+    card.querySelector('.device-name');
     list.appendChild(card);
   });
 }
@@ -725,7 +836,7 @@ async function queueFilesForContact(files, contact) {
   }
 }
 
-// ─── Pending transfers banner & modal ─────────────────────────────────────────
+// ─── Pending transfers ────────────────────────────────────────────────────────
 function showPendingBanner(transfers) {
   const banner = document.getElementById('pending-banner');
   if (!banner) return;
@@ -787,20 +898,20 @@ function showPendingModal() {
 // ─── Auto-Update Banner (Electron only) ──────────────────────────────────────
 (function setupUpdateBanner() {
   if (!window.dropbeam || !window.dropbeam.onUpdateReady) return;
-  window.dropbeam.onUpdateAvailable(() => { console.log('[updater] Update available — downloading in background...'); });
+  window.dropbeam.onUpdateAvailable(() => { console.log('[updater] Update available'); });
   window.dropbeam.onUpdateReady(() => {
     const existing = document.getElementById('update-banner');
     if (existing) return;
     const banner = document.createElement('div');
     banner.id = 'update-banner';
     banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#6c63ff;color:#fff;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;font-family:inherit;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.4)';
-    banner.innerHTML = `<span>⬆️ Update ready — restart to install</span><button id="update-restart-btn" style="background:#fff;color:#6c63ff;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:600;font-size:13px;margin-left:16px;">Restart &amp; Install</button>`;
+    banner.innerHTML = '<span>Update ready — restart to install</span><button id="update-restart-btn" style="background:#fff;color:#6c63ff;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:600;font-size:13px;margin-left:16px;">Restart</button>';
     document.body.prepend(banner);
     document.getElementById('update-restart-btn').addEventListener('click', () => window.dropbeam.restartAndInstall());
   });
 })();
 
-// ─── App Version Badge (Electron) ────────────────────────────────────────────
+// ─── App Version Badge ──────────────────────────────────────────────────────
 (async function showAppVersion() {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -831,19 +942,25 @@ init().catch(console.error);
     dot.className = 'connect-dot';
     if (status === 'connected') {
       dot.classList.add('connected');
-      statusText.textContent = '🔒 Connected';
+      statusText.textContent = 'Connected';
     } else if (status === 'connecting') {
       dot.classList.add('connecting');
-      statusText.textContent = 'Connecting…';
-    } else if (status === 'not-installed') {
+      statusText.textContent = 'Connecting...';
+    } else if (status === 'runtime-error') {
       dot.classList.add('not-installed');
-      statusText.textContent = 'Setup required';
+      statusText.textContent = 'Networking unavailable';
     } else {
       statusText.textContent = 'Not connected';
     }
   }
 
-  // Load user info
+  if (window.dropbeam && window.dropbeam.tailscale) {
+    window.dropbeam.tailscale.onRuntimeError && window.dropbeam.tailscale.onRuntimeError((msg) => {
+      console.warn('[connect] Tailscale runtime error:', msg);
+      setConnectStatus('runtime-error');
+    });
+  }
+
   try {
     const user = await window.dropbeam.auth.getUser();
     if (user && badge) {
@@ -854,7 +971,6 @@ init().catch(console.error);
     }
   } catch {}
 
-  // Listen for connect status updates from main process
   if (window.dropbeam.auth.onConnectStatus) {
     window.dropbeam.auth.onConnectStatus((status) => setConnectStatus(status));
   }
@@ -862,7 +978,6 @@ init().catch(console.error);
     window.dropbeam.tailscale.onConnectStatus((status) => setConnectStatus(status));
   }
 
-  // Sign out
   if (signoutBtn) {
     signoutBtn.addEventListener('click', async () => {
       if (confirm('Sign out of DropBeam Connect?')) {
