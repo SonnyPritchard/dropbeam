@@ -19,6 +19,7 @@
     "multicast-dns": "^7.2.5",
     "multer": "^1.4.5-lts.1",
     "simple-peer": "^9.11.1",
+    "socks-proxy-agent": "^8.0.4",
     "ws": "^8.20.0"
   },
   "devDependencies": {

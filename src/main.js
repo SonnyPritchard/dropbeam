@@ -9,6 +9,7 @@ const express = require('express');
 const multicastDns = require('multicast-dns');
 const multer = require('multer');
 const FormData = require('form-data');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 // ─── Embedded Tailscale runtime ───────────────────────────────────────────────
 // Users do not need to install Tailscale. The runtime manages bundled binaries.
@@ -535,7 +536,8 @@ ipcMain.handle('tailscale:httpSend', async (event, { filePath, peerIp, fileName 
       path: '/receive',
       method: 'POST',
       headers: form.getHeaders(),
-      timeout: 300000
+      timeout: 300000,
+      agent: new SocksProxyAgent(`socks5://127.0.0.1:${tailscaleRuntime.socksPort}`),
     };
 
     const req = http.request(reqOptions, (res) => {
@@ -902,6 +904,10 @@ async function startDropbeamConnect(token) {
     console.log('[connect] DropBeam Connect active');
     emitConnectStatus('connected');
     startMeshPeerPolling();
+
+    tailscaleRuntime.exec(['serve', '--bg', '--tcp=47822', 'tcp://127.0.0.1:47822'], 10000)
+      .then(() => console.log('[connect] HTTP receive exposed on tailnet via tailscale serve'))
+      .catch(err => console.warn('[connect] tailscale serve setup failed:', err.message));
   } catch (err) {
     console.warn('[connect] tailscale up error:', err.message);
     emitConnectStatus('not-connected');

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"os"
@@ -270,4 +271,69 @@ func DialPeer(peerIP string, port int) (net.Conn, error) {
 	defer cancel()
 
 	return s.Dial(ctx, "tcp", fmt.Sprintf("%s:%d", peerIP, port))
+}
+
+// TsnetSendFile sends a file to a peer's HTTP receive endpoint via the tailnet.
+// Returns empty string on success or an error message.
+func TsnetSendFile(filePath, peerIP string, port int, fileName string) string {
+	srvMu.Lock()
+	s := srv
+	srvMu.Unlock()
+
+	if s == nil {
+		return "tailscale not running"
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Sprintf("open: %v", err)
+	}
+	defer f.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+
+	go func() {
+		part, err := writer.CreateFormFile("file", fileName)
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(part, f); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		writer.Close()
+		pw.Close()
+	}()
+
+	transport := &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return s.Dial(ctx, "tcp", fmt.Sprintf("%s:%d", peerIP, port))
+		},
+	}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Minute}
+
+	reqURL := fmt.Sprintf("http://%s:%d/receive", peerIP, port)
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, pr)
+	if err != nil {
+		return fmt.Sprintf("request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("send: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Sprintf("server error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return ""
 }

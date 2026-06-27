@@ -34,6 +34,7 @@ class TailscaleRuntime {
     this.tailscaledBin = null;
     this.ready       = false;
     this._initPromise = null;
+    this.socksPort   = 1055;
   }
 
   // ── Binary resolution ────────────────────────────────────────────────────────
@@ -111,6 +112,7 @@ class TailscaleRuntime {
         '--socket', this.socketPath,
         '--tun',    'userspace-networking',
         '--port',   '0',   // OS picks a free UDP port
+        '--socks5-server', `localhost:${this.socksPort}`,
       ];
 
       console.log('[ts-runtime] Starting tailscaled…');

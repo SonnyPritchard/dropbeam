@@ -8,25 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody
-import okio.BufferedSink
-import okio.source
-import java.util.concurrent.TimeUnit
 
-/**
- * Sends files to mesh peers over HTTP and receives files via an embedded HTTP server.
- *
- * Send: POST http://<peerTailscaleIP>:47822/receive  (multipart/form-data)
- * Receive: The Go bridge runs an HTTP server on :47822 that accepts POSTs
- *          and writes files to the Downloads directory.
- *
- * This replaces the old WebRTC transfer and the Tailscale `file cp` CLI approach.
- * Both PC and Android will use this HTTP protocol once the PC app is updated.
- */
 class FileTransferManager(
     private val context: Context,
     private val tsManager: TailscaleManager,
@@ -44,12 +26,6 @@ class FileTransferManager(
 
     private val _activeTransfer = MutableStateFlow<TransferProgress?>(null)
     val activeTransfer: StateFlow<TransferProgress?> = _activeTransfer.asStateFlow()
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(0, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
 
     suspend fun sendFiles(uris: List<Uri>, peer: TailscaleManager.MeshPeer): Result<Unit> {
         return withContext(Dispatchers.IO) {
@@ -89,39 +65,32 @@ class FileTransferManager(
         val inputStream = resolver.openInputStream(uri)
             ?: return Result.failure(Exception("Cannot read file"))
 
-        val requestBody = object : RequestBody() {
-            override fun contentType() = "application/octet-stream".toMediaType()
-            override fun contentLength() = fileSize
-
-            override fun writeTo(sink: BufferedSink) {
-                inputStream.source().use { source ->
-                    var totalSent = 0L
-                    val buffer = okio.Buffer()
-                    var read: Long
-                    while (source.read(buffer, CHUNK_SIZE).also { read = it } != -1L) {
-                        sink.write(buffer, read)
-                        totalSent += read
-                        _activeTransfer.value = _activeTransfer.value?.copy(bytesSent = totalSent)
+        val tempFile = java.io.File.createTempFile("dropbeam_send_", "_$fileName", context.cacheDir)
+        try {
+            inputStream.use { input ->
+                tempFile.outputStream().use { output ->
+                    val buf = ByteArray(65536)
+                    var totalCopied = 0L
+                    var n: Int
+                    while (input.read(buf).also { n = it } != -1) {
+                        output.write(buf, 0, n)
+                        totalCopied += n
+                        _activeTransfer.value = _activeTransfer.value?.copy(bytesSent = totalCopied / 2)
                     }
                 }
             }
-        }
 
-        val multipartBody = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("file", fileName, requestBody)
-            .build()
-
-        val url = "http://${peer.ip}:${TailscaleManager.TRANSFER_PORT}/receive"
-        val request = Request.Builder()
-            .url(url)
-            .post(multipartBody)
-            .header("X-DropBeam-Sender", tsManager.status.value.selfIp)
-            .build()
-
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful) {
-            return Result.failure(Exception("Transfer failed: ${response.code}"))
+            val error = bridge.Bridge.tsnetSendFile(
+                tempFile.absolutePath,
+                peer.ip,
+                TailscaleManager.TRANSFER_PORT.toLong(),
+                fileName
+            )
+            if (error.isNotEmpty()) {
+                return Result.failure(Exception(error))
+            }
+        } finally {
+            tempFile.delete()
         }
 
         _activeTransfer.value = _activeTransfer.value?.copy(done = true, bytesSent = fileSize)
@@ -130,9 +99,5 @@ class FileTransferManager(
 
     fun clearTransfer() {
         _activeTransfer.value = null
-    }
-
-    companion object {
-        private const val CHUNK_SIZE = 65_536L
     }
 }

@@ -52,10 +52,8 @@ class TailscaleManager(private val context: Context) {
             try {
                 val dataDir = context.filesDir.resolve("tailscale").absolutePath
 
-                // Set receive directory to Downloads
-                val receiveDir = android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOWNLOADS
-                ).absolutePath
+                val receiveDir = java.io.File(context.getExternalFilesDir(null), "received").absolutePath
+                java.io.File(receiveDir).mkdirs()
                 bridge.Bridge.setReceiveDir(receiveDir)
 
                 val error = bridge.Bridge.tsnetStart(dataDir, controlUrl, authKey, hostname)
