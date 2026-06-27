@@ -1,21 +1,20 @@
 # DropBeam
 
-Direct device-to-device file transfer over a WireGuard mesh. Full speed from any location — no relay servers, no cloud storage, no file size limits.
+Direct device-to-device file transfer. Devices discover each other via mDNS and transfer files over WebRTC DataChannels — no cloud storage, no file size limits.
 
 ## How it works
 
-Each device runs an embedded Tailscale daemon that connects to a self-hosted Headscale coordination server. Once authenticated, devices get direct WireGuard tunnels to each other. Files transfer peer-to-peer over these encrypted tunnels at line speed, regardless of where the devices are.
+Devices discover each other on the local network using mDNS (with subnet HTTP scanning as a fallback). A WebSocket signaling server coordinates WebRTC peer connections, and files transfer directly over WebRTC DataChannels.
 
-No Tailscale account or install needed — the binaries ship inside the app.
+The codebase includes early integration work for a Headscale/Tailscale mesh (embedded tailscaled, device registration, pre-auth keys), but file transfers currently go through the WebRTC path — the WireGuard tunnel transfer path is not yet wired up.
 
 ## Features
 
-- Direct WireGuard tunnels between devices (no relay overhead)
-- Embedded Tailscale runtime (no user install required)
-- Self-hosted Headscale coordination (you own the infrastructure)
-- JWT-based user auth with device registration
-- Works across any network — LAN, WAN, NAT, whatever
+- Direct peer-to-peer file transfer over WebRTC DataChannels
+- mDNS device discovery (subnet HTTP scan fallback)
+- WebSocket signaling server (port 47821)
 - Electron app for Windows, macOS, Linux
+- Headscale/Tailscale mesh integration in progress (embedded runtime, device registration)
 
 ## Quick start
 
@@ -26,35 +25,33 @@ npm run download-tailscale
 npm start
 ```
 
-### Backend (runs in WSL)
+### Web server mode
 ```bash
-cd backend
-npm install
 node server.js
 ```
 
-Requires Headscale running on the same machine:
-```bash
-sudo headscale serve
-```
+This starts the signaling WebSocket server (port 47821) and serves the web frontend (port 3000).
 
 ## Architecture
 
 ```
-Electron App
-  |-- embedded tailscaled (userspace networking, no root)
-  |-- authenticates with backend (JWT)
-  |-- registers device, gets Headscale pre-auth key
-  '-- joins mesh, transfers files over WireGuard tunnels
+Discovery: mDNS (primary) + subnet HTTP scan (fallback)
 
-Backend (port 3001)
-  |-- Express + SQLite + JWT auth
-  |-- issues Headscale pre-auth keys for device registration
-  '-- reverse-proxies Headscale (port 8080) for Tailscale protocol
+Signaling: WebSocket on port 47821
+  - Electron: WS server in main.js
+  - Web: WS server in server.js
 
-Headscale (port 8080)
-  '-- coordinates the mesh, manages device keys and routing
+Transfer: WebRTC DataChannel (direct P2P)
 ```
+
+### Headscale integration (in progress)
+
+The codebase includes scaffolding for a Headscale/Tailscale mesh:
+- `src/tailscale-runtime.js` — manages embedded tailscale/tailscaled binaries
+- `src/login.html` / `src/login.js` — auth UI for device registration
+- Electron main process Tailscale init in `src/main.js`
+
+This will eventually replace WebRTC with WireGuard tunnel transfers, but the transfer path is not yet connected.
 
 ## Building
 
@@ -66,20 +63,9 @@ npm run build:all    # Both
 
 Tailscale binaries are bundled via electron-builder `extraResources`.
 
-## Configuration
-
-Backend config (`backend/.env`):
-- `PUBLIC_URL` — public URL for this backend (must match current public IP)
-- `HEADSCALE_URL` — Headscale address (default http://localhost:8080)
-- `HEADSCALE_API_KEY` — API bearer token
-- `JWT_SECRET` — signs auth tokens
-
-Headscale config (`/etc/headscale/config.yaml`):
-- `server_url` — must match `PUBLIC_URL` above
-
 ## Ports
 
 | Port | Purpose |
 |------|---------|
-| 3001 | Backend API (auth + Headscale proxy) |
-| 8080 | Headscale coordination server |
+| 3000 | Web frontend (server.js) |
+| 47821 | WebSocket signaling server |
