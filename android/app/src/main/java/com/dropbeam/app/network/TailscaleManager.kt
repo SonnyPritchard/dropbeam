@@ -52,14 +52,22 @@ class TailscaleManager(private val context: Context) {
             try {
                 val dataDir = context.filesDir.resolve("tailscale").absolutePath
 
-                // --- Go bridge call ---
-                // val error = Tailscale.tsnetStart(dataDir, controlUrl, authKey, hostname)
-                // if (error.isNotEmpty()) throw Exception(error)
-                // val selfIp = Tailscale.tsnetGetIP()
-                // Tailscale.tsnetStartHTTPServer(TRANSFER_PORT)
-                // TODO: Replace above with actual JNI calls once libtailscale.aar is built
+                // Set receive directory to Downloads
+                val receiveDir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS
+                ).absolutePath
+                bridge.Bridge.setReceiveDir(receiveDir)
 
-                val selfIp = "" // placeholder
+                val error = bridge.Bridge.tsnetStart(dataDir, controlUrl, authKey, hostname)
+                if (error.isNotEmpty()) throw Exception(error)
+
+                val selfIp = bridge.Bridge.tsnetGetIP()
+
+                val httpError = bridge.Bridge.tsnetStartHTTPServer(TRANSFER_PORT.toLong())
+                if (httpError.isNotEmpty()) {
+                    android.util.Log.w("TailscaleManager", "HTTP server: $httpError")
+                }
+
                 _status.value = Status(state = ConnectionState.CONNECTED, selfIp = selfIp)
 
                 startPeerPolling()
@@ -74,8 +82,7 @@ class TailscaleManager(private val context: Context) {
         pollJob = null
         withContext(Dispatchers.IO) {
             try {
-                // Tailscale.tsnetStop()
-                // TODO: JNI call
+                bridge.Bridge.tsnetStop()
             } catch (_: Exception) {}
         }
         _status.value = Status()
@@ -87,13 +94,21 @@ class TailscaleManager(private val context: Context) {
         pollJob = scope.launch {
             while (isActive) {
                 try {
-                    // val json = Tailscale.tsnetGetPeers()
-                    // val peers = parsePeers(json)
-                    // _peers.value = peers
-                    // TODO: JNI call — parse JSON array of peers
+                    val json = bridge.Bridge.tsnetGetPeers()
+                    val peers = parsePeers(json)
+                    _peers.value = peers
                 } catch (_: Exception) {}
                 delay(POLL_INTERVAL_MS)
             }
+        }
+    }
+
+    private fun parsePeers(json: String): List<MeshPeer> {
+        return try {
+            val type = object : com.google.gson.reflect.TypeToken<List<MeshPeer>>() {}.type
+            com.google.gson.Gson().fromJson(json, type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 

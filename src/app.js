@@ -165,6 +165,14 @@ async function init() {
   });
 
   log('info', `DropBeam started as "${selfInfo.name}" (${selfInfo.ip}:${selfInfo.port})`);
+
+  // Listen for incoming HTTP file transfers (mesh peers)
+  if (db.tailscale && db.tailscale.onFileReceived) {
+    db.tailscale.onFileReceived(({ fileName, size }) => {
+      log('success', `Received "${fileName}" (${formatBytes(size)})`);
+      showToast('File received!', `"${fileName}" saved to Downloads`, 'success');
+    });
+  }
 }
 
 // ─── Activity log toggle (collapsible on mobile) ──────────────────────────────
@@ -495,6 +503,28 @@ async function sendOneFile(file, device) {
   setDeviceProgress(device.id, 0);
 
   try {
+    // ── Mesh peer: use HTTP transfer over Tailscale (port 47822) ──────────
+    if (device.mesh === true && db.tailscale && db.tailscale.httpSend && file.path) {
+      // Listen for progress updates from main process
+      const progressHandler = (pct) => {
+        setDeviceProgress(device.id, pct);
+      };
+      db.tailscale.onProgress(progressHandler);
+
+      try {
+        await db.tailscale.httpSend({ filePath: file.path, peerIp: device.host, fileName: file.name });
+        setDeviceStatus(device.id, `Sent ${file.name}`, 'done');
+        setDeviceProgress(device.id, -1);
+        log('success', `"${file.name}" sent to ${device.name}`);
+        showToast('Transfer complete', `"${file.name}" sent to ${device.name}`, 'success');
+      } finally {
+        db.tailscale.offProgress();
+      }
+      setTimeout(() => setDeviceStatus(device.id, 'Ready to receive', 'idle'), 3000);
+      return;
+    }
+
+    // ── LAN / non-mesh peer: existing WebRTC flow ─────────────────────────
     const { pc, dc } = await getOrCreateConnection(device, transferId);
     await waitForOpen(dc);
 
@@ -525,7 +555,7 @@ async function sendOneFile(file, device) {
       setDeviceProgress(device.id, Math.round((offset / total) * 100));
     }
 
-    setDeviceStatus(device.id, `✓ Sent ${file.name}`, 'done');
+    setDeviceStatus(device.id, `Sent ${file.name}`, 'done');
     setDeviceProgress(device.id, -1);
     log('success', `"${file.name}" sent to ${device.name}`);
     showToast('Transfer complete', `"${file.name}" sent to ${device.name}`, 'success');

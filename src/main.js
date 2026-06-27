@@ -7,6 +7,8 @@ const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 const express = require('express');
 const multicastDns = require('multicast-dns');
+const multer = require('multer');
+const FormData = require('form-data');
 
 // ─── Embedded Tailscale runtime ───────────────────────────────────────────────
 // Users do not need to install Tailscale. The runtime manages bundled binaries.
@@ -449,6 +451,124 @@ ipcMain.handle('tailscale:sendFile', async (event, { filePath, peerIp }) => {
   });
 });
 
+// ─── HTTP File Transfer Server (port 47822) ─────────────────────────────────
+function startHttpTransferServer() {
+  const transferApp = express();
+  const uploadDir = os.tmpdir();
+  const upload = multer({ dest: uploadDir });
+
+  transferApp.post('/receive', upload.single('file'), (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ ok: false, error: 'No file uploaded' });
+      }
+
+      const originalName = req.file.originalname || 'untitled';
+      const downloadsDir = app.getPath('downloads');
+      let filePath = path.join(downloadsDir, originalName);
+
+      // Avoid overwriting (same pattern as save-file handler)
+      let counter = 1;
+      while (fs.existsSync(filePath)) {
+        const ext = path.extname(originalName);
+        const base = path.basename(originalName, ext);
+        filePath = path.join(downloadsDir, `${base} (${counter})${ext}`);
+        counter++;
+      }
+
+      fs.renameSync(req.file.path, filePath);
+      const size = req.file.size;
+      const savedName = path.basename(filePath);
+
+      // System notification
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'DropBeam',
+          body: `Received: ${savedName}`
+        }).show();
+      }
+
+      // Notify renderer
+      if (mainWindow) {
+        mainWindow.webContents.send('file-received', { fileName: savedName, senderIp: req.ip, size });
+      }
+
+      res.json({ ok: true, file: savedName, bytes: size });
+    } catch (err) {
+      console.error('[http-receive] Error:', err.message);
+      // Clean up temp file on error
+      if (req.file && req.file.path) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  transferApp.get('/info', (req, res) => {
+    res.json({ name: deviceName, ip: getLocalIp() });
+  });
+
+  const transferServer = http.createServer(transferApp);
+  transferServer.listen(47822, '0.0.0.0', () => {
+    console.log('[http-transfer] Listening on port 47822');
+  });
+  transferServer.on('error', (err) => {
+    console.error('[http-transfer] Server error:', err.message);
+  });
+}
+
+// ─── HTTP Send IPC Handler ───────────────────────────────────────────────────
+ipcMain.handle('tailscale:httpSend', async (event, { filePath, peerIp, fileName }) => {
+  if (!filePath || !peerIp) throw new Error('filePath and peerIp required');
+
+  const stat = fs.statSync(filePath);
+  const totalSize = stat.size;
+
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    const fileStream = fs.createReadStream(filePath);
+    form.append('file', fileStream, { filename: fileName || path.basename(filePath), contentType: 'application/octet-stream' });
+
+    const reqOptions = {
+      hostname: peerIp,
+      port: 47822,
+      path: '/receive',
+      method: 'POST',
+      headers: form.getHeaders(),
+      timeout: 300000
+    };
+
+    const req = http.request(reqOptions, (res) => {
+      let data = '';
+      res.on('data', (d) => data += d);
+      res.on('end', () => {
+        if (mainWindow) mainWindow.webContents.send('tailscale:progress', 100);
+        try {
+          const body = JSON.parse(data);
+          if (body.ok) resolve({ ok: true });
+          else reject(new Error(body.error || 'Transfer failed'));
+        } catch {
+          if (res.statusCode >= 200 && res.statusCode < 300) resolve({ ok: true });
+          else reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => reject(err));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Transfer timeout')); });
+
+    // Track upload progress
+    let bytesSent = 0;
+    fileStream.on('data', (chunk) => {
+      bytesSent += chunk.length;
+      const pct = Math.min(99, Math.round((bytesSent / totalSize) * 100));
+      if (mainWindow) mainWindow.webContents.send('tailscale:progress', pct);
+    });
+
+    form.pipe(req);
+  });
+});
+
 // ─── Internet (Render) Integration ───────────────────────────────────────────
 const RENDER_API = 'https://dropbeam.onrender.com';
 let renderWs = null;
@@ -624,6 +744,9 @@ app.whenReady().then(() => {
   // Start mDNS + subnet scan after a short delay (so port is bound)
   // connectToPublicSignal() disabled — local/WireGuard-only mode
   setTimeout(() => { startMdns(); startSubnetScan(); }, 500);
+
+  // ── HTTP file transfer server (port 47822) ────────────────────────────────
+  startHttpTransferServer();
 
   // ── Start embedded Tailscale runtime ─────────────────────────────────────
   tailscaleRuntime.init()

@@ -23,8 +23,10 @@ contextBridge.exposeInMainWorld('dropbeam', {
   tailscale: {
     getPeers: () => ipcRenderer.invoke('tailscale:getPeers'),
     sendFile: (args) => ipcRenderer.invoke('tailscale:sendFile', args),
+    httpSend: (args) => ipcRenderer.invoke('tailscale:httpSend', args),
     onProgress: (cb) => ipcRenderer.on('tailscale:progress', (e, pct) => cb(pct)),
     offProgress: () => ipcRenderer.removeAllListeners('tailscale:progress'),
+    onFileReceived: (cb) => ipcRenderer.on('file-received', (e, data) => cb(data)),
     onConnectStatus: (cb) => ipcRenderer.on('tailscale:connectStatus', (e, status) => cb(status)),
     onRuntimeError: (cb) => ipcRenderer.on('tailscale:runtimeError', (e, msg) => cb(msg))
   },

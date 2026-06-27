@@ -13,6 +13,10 @@ import androidx.core.app.NotificationCompat
  */
 class TransferService : Service() {
 
+    companion object {
+        var tailscaleManager: TailscaleManager? = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = NotificationCompat.Builder(this, "transfers")
             .setContentTitle("DropBeam")
