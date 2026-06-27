@@ -1,25 +1,16 @@
-# Networking — Bundled Tailscale Runtime
+# Networking — Embedded Tailscale Runtime
 
-DropBeam ships with the Tailscale CLI binaries (`tailscale` / `tailscaled`) embedded
-inside the installer. Users do **not** need to install Tailscale separately.
-
----
+DropBeam ships with Tailscale CLI binaries (`tailscale` / `tailscaled`) embedded inside the installer. Users do **not** need to install Tailscale separately.
 
 ## How it works
 
-| Layer | Technology | Notes |
-|---|---|---|
-| LAN discovery | mDNS + subnet scan | No internet required |
-| File transfer | WebRTC data channels | Direct peer-to-peer via STUN/TURN |
-| Mesh overlay | Tailscale (embedded) | Headscale coordination server |
+Devices authenticate with the DropBeam backend, receive a Headscale pre-auth key, and join the mesh. The embedded `tailscaled` daemon creates direct WireGuard tunnels between devices for file transfer at full line speed.
 
-The embedded `tailscaled` daemon is started in **userspace-networking** mode
-(`--tun=userspace-networking`). This means:
+The daemon runs in **userspace-networking** mode (`--tun=userspace-networking`):
 
 - **No TUN/kernel module required** — works without root or administrator privileges.
 - **No OS routing table changes** — traffic is handled inside the process.
-- The daemon uses a private socket path under the app's userData directory, so it never
-  conflicts with a system-installed Tailscale instance.
+- Uses a private socket path under the app's userData directory, so it never conflicts with a system-installed Tailscale instance.
 
 ---
 
@@ -27,9 +18,6 @@ The embedded `tailscaled` daemon is started in **userspace-networking** mode
 
 Tailscale is open-source software licensed under the **BSD 3-Clause License**.
 Full source code and license text: <https://github.com/tailscale/tailscale>
-
-By bundling these binaries, DropBeam complies with the BSD 3-Clause terms:
-the original copyright notice is reproduced below.
 
 ```
 Copyright (c) Tailscale Inc & AUTHORS
@@ -50,49 +38,39 @@ are permitted provided that the following conditions are met:
 
 ---
 
-## OS permissions required
+## OS permissions
 
 ### macOS
 - **Network access** — to reach the Headscale coordination server and DERP relays.
-- **Incoming connections** — to accept Taildrop file transfers.
-- No special entitlements beyond those already present in a standard Electron app.
-- Note: pre-built Tailscale binaries are signed by Tailscale Inc. When re-distributed
-  inside DropBeam, macOS Gatekeeper may flag them if the outer app is not notarised.
-  For production releases, notarise the app via Apple's notarisation service.
+- **Incoming connections** — to accept file transfers.
+- Pre-built Tailscale binaries are signed by Tailscale Inc. macOS Gatekeeper may flag them if the outer app is not notarised. Notarise the app for production releases.
 
 ### Windows
-- **Firewall prompt** — Windows Firewall may ask on first run to allow `tailscaled.exe`
-  to accept incoming connections. The user should allow it for mesh networking to work.
-- No UAC elevation is required because userspace-networking mode is used.
+- **Firewall prompt** — Windows Firewall may ask on first run to allow `tailscaled.exe` to accept incoming connections. Allow it for mesh networking to work.
+- No UAC elevation required (userspace-networking mode).
 
 ---
 
-## Security considerations
+## Security
 
-- The embedded binaries are pinned to a specific Tailscale version (see `TAILSCALE_VERSION`
-  in `.github/workflows/build.yml`). Update this value and rebuild to pick up security patches.
-- Tailscale traffic is encrypted end-to-end with WireGuard. The coordination server
-  (Headscale) sees device metadata but not file contents.
-- The pre-auth keys used for device registration are single-use and expire.
-- The Tailscale state file is stored in the app's userData directory
-  (`%APPDATA%\DropBeam\tailscale-runtime\state.conf` on Windows,
-   `~/Library/Application Support/DropBeam/tailscale-runtime/state.conf` on macOS).
+- Embedded binaries are pinned to a specific Tailscale version (see `TAILSCALE_VERSION` in `.github/workflows/build.yml`).
+- Traffic is encrypted end-to-end with WireGuard. Headscale sees device metadata but not file contents.
+- Pre-auth keys are single-use and expire after 24 hours.
+- Tailscale state is stored per-app in userData (`%APPDATA%\DropBeam\tailscale-runtime\state.conf` on Windows, `~/Library/Application Support/DropBeam/tailscale-runtime/state.conf` on macOS).
 
 ---
 
 ## Updating the bundled version
 
 1. Change `TAILSCALE_VERSION` in `.github/workflows/build.yml`.
-2. Push — CI will download the new binaries and include them in the build artifacts.
+2. Push — CI downloads new binaries and includes them in the build.
 3. For local dev: `TAILSCALE_VERSION=x.y.z npm run download-tailscale`.
 
 ---
 
-## What remains manual
+## Infrastructure
 
-- **Headscale server** — DropBeam Connect still requires a running Headscale server
-  (configured via `DROPBEAM_SERVER`). The embedded runtime only replaces the client-side
-  Tailscale install; the server-side infrastructure is separate.
-- **macOS notarisation** — must be set up separately in CI with an Apple Developer
-  account for production releases.
+- **Headscale server** — self-hosted, runs in WSL alongside the backend. Config at `/etc/headscale/config.yaml`.
+- **Backend** — Express API in `backend/` handles auth and proxies Headscale protocol traffic.
+- **macOS notarisation** — requires Apple Developer account, set up separately in CI.
 - **Code-signing** — both platforms benefit from signing to avoid OS trust prompts.
