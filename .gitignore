@@ -2,6 +2,10 @@ node_modules/
 dist/
 .DS_Store
 *.log
-android/
+android/app/libs/*.aar
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
 backend/dropbeam.db
 backend/.env

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DropBeam</string>
+    <string name="transfer_notification_channel">File Transfers</string>
+    <string name="transfer_notification_title">DropBeam Transfer</string>
+</resources>
