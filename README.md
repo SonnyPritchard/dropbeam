@@ -1,79 +1,85 @@
-# DropBeam 🚀
+# DropBeam
 
-AirDrop-style P2P file transfer over LAN. Works between any combination of Electron app and web browser — no internet required.
+Direct device-to-device file transfer over a WireGuard mesh. Full speed from any location — no relay servers, no cloud storage, no file size limits.
+
+## How it works
+
+Each device runs an embedded Tailscale daemon that connects to a self-hosted Headscale coordination server. Once authenticated, devices get direct WireGuard tunnels to each other. Files transfer peer-to-peer over these encrypted tunnels at line speed, regardless of where the devices are.
+
+No Tailscale account or install needed — the binaries ship inside the app.
 
 ## Features
-- 🖥️ **Electron desktop app** (Windows, macOS, Linux)
-- 🌐 **Web browser mode** — share a URL, anyone on the LAN can use it
-- 🔍 **Auto-discovery** via mDNS (primary) + subnet scan (fallback, for Windows firewall)
-- ⚡ **WebRTC data channels** — direct P2P transfer, no server relay
-- 🔀 **Cross-compatible** — Electron↔Electron, Electron↔Browser, Browser↔Browser
 
-## Usage
+- Direct WireGuard tunnels between devices (no relay overhead)
+- Embedded Tailscale runtime (no user install required)
+- Self-hosted Headscale coordination (you own the infrastructure)
+- JWT-based user auth with device registration
+- Works across any network — LAN, WAN, NAT, whatever
+- Electron app for Windows, macOS, Linux
 
-### Electron App
+## Quick start
+
+### Electron app
 ```bash
 npm install
+npm run download-tailscale
 npm start
 ```
 
-### Web Server Mode
+### Backend (runs in WSL)
 ```bash
+cd backend
 npm install
-npm run web
-# or: node server.js
+node server.js
 ```
 
-The server prints your local URLs on startup:
+Requires Headscale running on the same machine:
+```bash
+sudo headscale serve
 ```
-🚀 DropBeam Web Server started
-────────────────────────────────────────
-   http://192.168.1.10:3000
-   (also http://localhost:3000)
-────────────────────────────────────────
-📡 Signaling WS on port 47821
-🔍 Discovering peers via mDNS + subnet scan
-```
-
-Share the URL (e.g. `http://192.168.1.10:3000`) with anyone on your LAN. They open it in a browser and can immediately send/receive files.
-
-### Cross-Compatibility
-All modes discover each other automatically:
-- Electron apps + web server instances announce on mDNS and respond to subnet scans
-- Signaling uses WebSocket on port **47821** — same protocol everywhere
-- WebRTC negotiation is identical regardless of client type
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Discovery: mDNS (primary) + subnet HTTP scan (fallback)    │
-│                                                             │
-│  Signaling: WebSocket on port 47821                         │
-│  - Electron: WS server in main.js                           │
-│  - Web: WS server in server.js (also proxies for browsers)  │
-│                                                             │
-│  Transfer: WebRTC DataChannel (direct P2P)                  │
-└─────────────────────────────────────────────────────────────┘
-```
+Electron App
+  |-- embedded tailscaled (userspace networking, no root)
+  |-- authenticates with backend (JWT)
+  |-- registers device, gets Headscale pre-auth key
+  '-- joins mesh, transfers files over WireGuard tunnels
 
-### Web Server Signaling Flow
-```
-Browser ──(WS register)──► server.js:47821
-Browser ──(forward msg)──► server.js ──(WS)──► target:47821
-target  ──(WS msg)───────► server.js ──(WS)──► Browser
+Backend (port 3001)
+  |-- Express + SQLite + JWT auth
+  |-- issues Headscale pre-auth keys for device registration
+  '-- reverse-proxies Headscale (port 8080) for Tailscale protocol
+
+Headscale (port 8080)
+  '-- coordinates the mesh, manages device keys and routing
 ```
 
 ## Building
 
 ```bash
 npm run build:win    # Windows installer
-npm run build:mac    # macOS DMG
+npm run build:mac    # macOS DMG (x64 + arm64)
 npm run build:all    # Both
 ```
 
-## Ports Used
-| Port  | Purpose                        |
-|-------|--------------------------------|
-| 3000  | HTTP (web server mode only)    |
-| 47821 | WebSocket signaling (all modes)|
+Tailscale binaries are bundled via electron-builder `extraResources`.
+
+## Configuration
+
+Backend config (`backend/.env`):
+- `PUBLIC_URL` — public URL for this backend (must match current public IP)
+- `HEADSCALE_URL` — Headscale address (default http://localhost:8080)
+- `HEADSCALE_API_KEY` — API bearer token
+- `JWT_SECRET` — signs auth tokens
+
+Headscale config (`/etc/headscale/config.yaml`):
+- `server_url` — must match `PUBLIC_URL` above
+
+## Ports
+
+| Port | Purpose |
+|------|---------|
+| 3001 | Backend API (auth + Headscale proxy) |
+| 8080 | Headscale coordination server |

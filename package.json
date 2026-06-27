@@ -1,7 +1,7 @@
 {
   "name": "dropbeam",
   "version": "1.1.12",
-  "description": "AirDrop-style P2P file transfer over LAN",
+  "description": "Direct device-to-device file transfer over a WireGuard mesh",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
